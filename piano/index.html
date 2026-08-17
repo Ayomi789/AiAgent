@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Piano Kit — Play &amp; Record</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <main class="stage">
+        <header class="topbar">
+            <h1>PIANO<span class="dot">KIT</span></h1>
+            <p class="tagline">Strike the keys, ride the pedal, or record a take</p>
+        </header>
+
+        <section class="transport">
+            <button id="playBtn" class="play-btn" type="button">▶ Play</button>
+            <button id="recBtn" class="rec-btn" type="button">● Record</button>
+            <button id="clearBtn" class="ghost" type="button">Clear</button>
+            <button type="button" class="song-btn" data-song="runaway">Runaway</button>
+
+            <div class="octave" aria-label="Octave shift">
+                <button id="octDown" class="oct-btn" type="button">−</button>
+                <span id="octVal" class="oct-label">C4–F5</span>
+                <button id="octUp" class="oct-btn" type="button">+</button>
+            </div>
+
+            <button id="pedalBtn" class="pedal-btn" type="button">Pedal</button>
+
+            <label class="knob" for="volume">
+                <span>Volume <em id="volVal">80%</em></span>
+                <input type="range" id="volume" min="0" max="100" value="80">
+            </label>
+        </section>
+
+        <section class="keys-scroll">
+            <div class="keyboard" id="keys" aria-label="Piano keyboard"></div>
+        </section>
+
+        <p id="status" class="status">0 notes · 8.0 s loop</p>
+
+        <footer class="hint">
+            <p><kbd>A</kbd>…<kbd>'</kbd> white keys &nbsp;·&nbsp; <kbd>W</kbd><kbd>E</kbd><kbd>T</kbd><kbd>Y</kbd><kbd>U</kbd><kbd>O</kbd><kbd>P</kbd> black keys &nbsp;·&nbsp; <kbd>Space</kbd> sustain pedal &nbsp;·&nbsp; <kbd>R</kbd> record &nbsp;·&nbsp; <kbd>Z</kbd>/<kbd>X</kbd> octave</p>
+        </footer>
+    </main>
+
+    <script src="piano.js"></script>
+</body>
+</html>

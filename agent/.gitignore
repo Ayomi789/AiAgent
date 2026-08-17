@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+reports/
+.env
+config.ci.generated.yml
+targets/vulnerable_app/vuln.db

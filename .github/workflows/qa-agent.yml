@@ -1,0 +1,233 @@
+# QA Agent CI
+#
+# Runs the agent against a target on push/PR (when agent/ changes) and on
+# manual dispatch. Fails the build on:
+#   - findings at/above a severity (--fail-on, default high)
+#   - NEW findings vs the previous run (--baseline-on, default high)
+# On pull requests it posts a Markdown summary + findings diff as a comment.
+#
+# Required setup:
+#   - Repository secret  NVIDIA_API_KEY  (the LLM API key)
+#   - Repository variable QA_TARGET_URL  (the target to scan) — or pass
+#     a `target` input via workflow_dispatch
+#   - Optional secrets QA_USERNAME / QA_PASSWORD for login flows
+#
+# The baseline is carried between runs via the actions/cache (restore the
+# previous run's report, diff against it, save this run's report as the new
+# baseline). The first CI run has no baseline and passes the baseline check.
+
+name: QA Agent
+
+on:
+  push:
+    paths:
+      - 'agent/**'
+      - '.github/workflows/qa-agent.yml'
+  pull_request:
+    paths:
+      - 'agent/**'
+      - '.github/workflows/qa-agent.yml'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target URL to scan (overrides QA_TARGET_URL variable)'
+        required: false
+      fail_on:
+        description: 'Fail if any finding is at or above this severity'
+        required: false
+        default: 'high'
+      baseline_on:
+        description: 'Fail if NEW findings vs baseline are at or above this severity'
+        required: false
+        default: 'high'
+
+jobs:
+  scan:
+    name: Scan target
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the agent (with dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "./agent[dev]"
+
+      - name: Run smoke tests
+        run: |
+          python -m pytest agent/tests -q
+
+      - name: Install Playwright browser
+        run: python -m playwright install --with-deps chromium
+
+      - name: Resolve target
+        id: target
+        run: |
+          TARGET="${{ github.event.inputs.target || vars.QA_TARGET_URL || '' }}"
+          if [ -z "$TARGET" ]; then
+            echo "::error::No target configured. Set the QA_TARGET_URL repository variable, or use workflow_dispatch with a target input."
+            exit 1
+          fi
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+
+      - name: Restore baseline
+        id: cache-baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: baseline
+          key: qa-baseline-${{ github.run_id }}
+          restore-keys: |
+            qa-baseline-
+
+      - name: Build CI config
+        run: |
+          python - <<'PY'
+          import os, yaml
+          cfg = yaml.safe_load(open('agent/config.ci.yml'))
+          cfg['target'] = os.environ['TARGET']
+          if os.environ.get('QA_USERNAME'):
+              cfg['credentials'] = {
+                  'username': os.environ['QA_USERNAME'],
+                  'password': os.environ.get('QA_PASSWORD', ''),
+              }
+          yaml.safe_dump(cfg, open('config.ci.generated.yml', 'w'), sort_keys=False)
+          PY
+        env:
+          TARGET: ${{ steps.target.outputs.target }}
+          QA_USERNAME: ${{ secrets.QA_USERNAME }}
+          QA_PASSWORD: ${{ secrets.QA_PASSWORD }}
+
+      - name: Run the agent
+        id: run
+        continue-on-error: true
+        run: |
+          set +e
+          ARGS=(--config config.ci.generated.yml --fail-on "$FAIL_ON" --baseline-on "$BASELINE_ON")
+          if [ -f baseline/report-baseline.json ]; then
+            ARGS+=(--baseline baseline/report-baseline.json)
+          fi
+          python -m qaagent run "${ARGS[@]}" 2>&1 | tee /tmp/qa-run.log
+          code=${PIPESTATUS[0]}
+          echo "exit=$code" >> "$GITHUB_OUTPUT"
+          exit 0 # the gate step decides the job outcome
+        env:
+          FAIL_ON: ${{ github.event.inputs.fail_on || 'high' }}
+          BASELINE_ON: ${{ github.event.inputs.baseline_on || 'high' }}
+
+      - name: Build PR comment
+        id: comment
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info']
+          SEV_ICON = {'critical': '🔴', 'high': '🟠', 'medium': '🟡', 'low': '🔵', 'info': '⚪'}
+
+          def sev_sort(f):
+              return SEV_ORDER.index(f.get('severity', 'info'))
+
+          latest_path = Path('reports/latest.json')
+          if not latest_path.exists():
+              Path('comment-body.md').write_text(
+                  '## 🤖 QA Agent scan\n\n_The run did not produce results (see workflow logs)._',
+                  encoding='utf-8',
+              )
+              raise SystemExit(0)
+
+          latest = json.loads(latest_path.read_text(encoding='utf-8'))
+          findings = sorted(latest.get('findings', []), key=sev_sort)
+          lines = ['## 🤖 QA Agent scan results', '']
+          lines.append(f"**Target:** {latest.get('target')}")
+          counts = ', '.join(
+              f"{k}={v}" for k, v in latest.get('by_severity', {}).items() if v
+          ) or 'none'
+          lines.append(f"**Status:** {latest.get('status')} · **Findings:** {latest.get('findings_total', len(findings))} ({counts})")
+          lines.append('')
+          if findings:
+              lines.append('| Severity | Finding | URL |')
+              lines.append('|---|---|---|')
+              for f in findings[:25]:
+                  title = f['title'].replace('|', '\\|')
+                  lines.append(f"| {SEV_ICON.get(f['severity'], '')} {f['severity']} | {title} | {f.get('url') or ''} |")
+              lines.append('')
+          else:
+              lines.append('_No findings._')
+              lines.append('')
+
+          baseline_path = Path('baseline/report-baseline.json')
+          if baseline_path.exists():
+              from qaagent.report.diff import compare_reports
+              new_report = sorted(Path('reports').glob('report-*.json'))[-1]
+              cur = json.loads(new_report.read_text(encoding='utf-8'))
+              prev = json.loads(baseline_path.read_text(encoding='utf-8'))
+              diff = compare_reports(cur, prev)
+              lines.append(
+                  f"**Diff vs previous run:** {diff.counts['new']} new, "
+                  f"{diff.counts['fixed']} fixed, {diff.counts['unchanged']} unchanged"
+              )
+              if diff.new:
+                  lines.append('')
+                  lines.append('**New:**')
+                  for f in diff.new:
+                      lines.append(f"- {SEV_ICON.get(f['severity'], '')} **{f['title']}**")
+              if diff.fixed:
+                  lines.append('')
+                  lines.append('**Fixed:**')
+                  for f in diff.fixed:
+                      lines.append(f"- ✅ {f['title']}")
+              lines.append('')
+          else:
+              lines.append('_No previous baseline (first run) — this run becomes the baseline._')
+              lines.append('')
+
+          lines.append('---')
+          lines.append('_Generated by the QA agent workflow._')
+          Path('comment-body.md').write_text('\n'.join(lines), encoding='utf-8')
+          PY
+
+      - name: Post PR comment
+        if: github.event_name == 'pull_request' && always() && steps.comment.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('comment-body.md', 'utf8'); // comment-body.md is written as UTF-8
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+      - name: Prepare next baseline
+        if: always()
+        run: |
+          mkdir -p baseline
+          ls -t reports/report-*.json 2>/dev/null | head -1 | xargs -I{} cp {} baseline/report-baseline.json 2>/dev/null || true
+
+      - name: Save baseline
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: baseline
+          key: qa-baseline-${{ github.run_id }}
+
+      - name: Gate
+        if: always()
+        run: |
+          code="${{ steps.run.outputs.exit }}"
+          if [ -n "$code" ] && [ "$code" != "0" ]; then
+            echo "::error::QA agent exited with code $code (1 = findings at/above threshold, 3 = baseline regressions, 2 = bad arguments)"
+            exit "$code"
+          fi

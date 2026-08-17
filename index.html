@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drum Kit — Play &amp; Program</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <main class="stage">
+        <header class="topbar">
+            <h1>DRUM<span class="dot">KIT</span></h1>
+            <p class="tagline">Hit the pads, play the keys, or program a groove</p>
+        </header>
+
+        <section class="transport">
+            <button id="playBtn" class="play-btn" type="button">▶ Play</button>
+
+            <label class="knob" for="bpm">
+                <span>Tempo <em id="bpmVal">100</em> BPM</span>
+                <input type="range" id="bpm" min="40" max="200" value="100">
+            </label>
+
+            <label class="knob" for="swing">
+                <span>Swing <em id="swingVal">0%</em></span>
+                <input type="range" id="swing" min="0" max="75" value="0">
+            </label>
+
+            <label class="knob" for="volume">
+                <span>Volume <em id="volVal">80%</em></span>
+                <input type="range" id="volume" min="0" max="100" value="80">
+            </label>
+        </section>
+
+        <section class="pads" id="pads" aria-label="Drum pads"></section>
+
+        <section class="seq-panel">
+            <div class="seq-head">
+                <h2>Step Sequencer</h2>
+                <div class="seq-actions">
+                    <div class="presets" aria-label="Pattern presets">
+                        <button type="button" class="preset" data-preset="showcase">Showcase</button>
+                        <button type="button" class="preset" data-preset="rock">Rock</button>
+                        <button type="button" class="preset" data-preset="hiphop">Hip Hop</button>
+                        <button type="button" class="preset" data-preset="funk">Funk</button>
+                        <button type="button" class="preset" data-preset="four">4-on-Floor</button>
+                        <button type="button" class="preset" data-preset="runaway">Runaway</button>
+                    </div>
+                    <button type="button" id="clearBtn" class="ghost">Clear</button>
+                </div>
+            </div>
+            <div class="sequencer" id="sequencer"></div>
+        </section>
+
+        <footer class="hint">
+            <p>Keys <kbd>A</kbd>–<kbd>K</kbd> hit the pads &nbsp;·&nbsp; <kbd>Space</kbd> starts / stops the sequencer &nbsp;·&nbsp; click pads or cells to build a groove</p>
+        </footer>
+    </main>
+
+    <div id="loader" class="loader">Loading sounds…</div>
+
+    <script src="drum.js?v=2"></script>
+</body>
+</html>

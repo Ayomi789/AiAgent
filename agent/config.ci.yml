@@ -1,0 +1,27 @@
+# CI configuration for the QA agent — used by .github/workflows/qa-agent.yml.
+# The workflow copies this, substitutes the real `target` (and optionally
+# credentials from secrets), and runs `qaagent run` against it.
+#
+# Do not use this file locally — use config.example.yml (msedge channel).
+
+target: https://CHANGE-ME.invalid # placeholder; the workflow overrides it
+
+scope:
+  # Empty allowed_origins = the agent auto-scopes to the target's origin.
+  allowed_origins: []
+  excluded_paths: []
+  max_requests_per_minute: 60
+  timeout_seconds: 60
+
+llm:
+  model: meta/llama-3.3-70b-instruct
+  api_key_env: NVIDIA_API_KEY
+  api_base: https://integrate.api.nvidia.com/v1
+  temperature: 0.0
+  max_tokens: 1024
+
+agent:
+  max_steps: 25
+  headless: true
+  browser_channel: chromium # Playwright's Chromium is installed in CI
+  output_dir: reports

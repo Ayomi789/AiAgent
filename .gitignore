@@ -1,0 +1,7 @@
+# Freebuff-local state (run docs, preview logs)
+.freebuff/
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+*.log

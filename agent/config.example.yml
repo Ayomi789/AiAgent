@@ -1,0 +1,40 @@
+# QA Agent configuration
+# Copy to config.yml and adjust. The example targets the local vulnerable app
+# that ships in targets/vulnerable_app (see its README).
+
+# Target to test. The scope below must match its origin.
+target: http://127.0.0.1:5001
+
+scope:
+  # Origins the agent may visit. The scope guard hard-blocks anything else.
+  allowed_origins:
+    - http://127.0.0.1:5001
+  excluded_paths: []          # e.g. ["/logout"]
+  max_requests_per_minute: 30 # polite default; raise for real targets
+  timeout_seconds: 30
+
+llm:
+  model: meta/llama-3.3-70b-instruct   # any model on your OpenAI-compatible API
+  api_key_env: NVIDIA_API_KEY          # env var (or agent/.env) holding the key
+  api_base: https://integrate.api.nvidia.com/v1
+  temperature: 0.0
+  max_tokens: 1024
+
+credentials:
+  # Optional test credentials the agent may use for auth flows.
+  username: alice
+  password: alice123
+
+agent:
+  max_steps: 25               # cap on observe/think/act/verify iterations
+  headless: true
+  browser_channel: msedge     # msedge = system Edge (no download); chromium = playwright's
+  output_dir: reports
+  # Extra sensitive artifact names to probe, in addition to the built-in
+  # wordlist (~60 names: backup.sql, db.sqlite3, .env.bak, ...). Map a path
+  # to the content kind used for validation: sql|sqlite|archive|env|key|git|text.
+  # e.g. for a site that once shipped these:
+  # sensitive_files:
+  #   /secrets.tar.gz: archive
+  #   /deploy.key: key
+  #   /old-config.env: env
