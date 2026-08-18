@@ -8,8 +8,11 @@ from datetime import datetime, timezone
 from qaagent.live import LiveState
 from qaagent.models import Finding, FindingCategory, Report, Severity
 from qaagent.report.generator import (
+    render_html,
     render_markdown,
     save_report,
+    save_report_csv,
+    save_report_html,
     save_report_json,
     save_summary,
 )
@@ -28,6 +31,86 @@ def _report() -> Report:
     )
     report.summary = report.build_summary()
     return report
+
+
+def test_render_html_ranks_by_severity():
+    html = render_html(_report())
+    assert html.index("CRITICAL") < html.index("LOW")
+    assert "<html" in html
+    assert "No findings" not in html
+
+
+def test_render_html_empty():
+    report = Report(target="http://x.test")
+    assert "No findings" in render_html(report)
+
+
+def test_render_html_shows_content_type():
+    report = Report(
+        target="http://x.test",
+        findings=[
+            Finding(
+                title="Sensitive file",
+                severity=Severity.MEDIUM,
+                category=FindingCategory.SECURITY,
+                content_type="application/sql",
+            )
+        ],
+    )
+    html = render_html(report)
+    assert "application/sql" in html
+
+
+def test_render_html_escapes_special_chars():
+    report = Report(
+        target="http://x.test",
+        findings=[
+            Finding(
+                title="XSS <script>alert(1)</script>",
+                severity=Severity.HIGH,
+                category=FindingCategory.SECURITY,
+                description="Uses \"quotes\" and <tags>",
+            )
+        ],
+    )
+    html = render_html(report)
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_save_html_and_csv(tmp_path):
+    report = _report()
+    html_path = save_report_html(report, tmp_path)
+    csv_path = save_report_csv(report, tmp_path)
+    assert html_path.exists()
+    assert csv_path.exists()
+    assert html_path.suffix == ".html"
+    assert csv_path.suffix == ".csv"
+    assert html_path.read_text(encoding="utf-8").startswith("<!DOCTYPE html>")
+    lines = csv_path.read_text(encoding="utf-8").splitlines()
+    non_empty = [l for l in lines if l.strip()]
+    assert len(non_empty) == 3  # header + 2 findings
+    assert non_empty[0].startswith("id,severity")
+
+
+def test_csv_content_type_present(tmp_path):
+    report = Report(
+        target="http://x.test",
+        started_at=datetime.now(timezone.utc),
+        finished_at=datetime.now(timezone.utc),
+        findings=[
+            Finding(
+                title="Sensitive file",
+                severity=Severity.MEDIUM,
+                category=FindingCategory.SECURITY,
+                content_type="application/json",
+            )
+        ],
+    )
+    report.summary = report.build_summary()
+    csv_path = save_report_csv(report, tmp_path)
+    text = csv_path.read_text(encoding="utf-8")
+    assert "application/json" in text
 
 
 def test_render_markdown_ranks_by_severity():

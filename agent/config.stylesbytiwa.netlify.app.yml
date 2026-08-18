@@ -1,0 +1,23 @@
+# Sentinel config for https://stylesbytiwa.netlify.app (auto-generated - edit freely).
+# Add test credentials or extra sensitive_files here if you have them.
+
+target: https://stylesbytiwa.netlify.app
+
+scope:
+  allowed_origins: []        # empty = auto-scope to the target's origin
+  excluded_paths: []
+  max_requests_per_minute: 30
+  timeout_seconds: 30
+
+llm:
+  model: meta/llama-3.3-70b-instruct
+  api_key_env: NVIDIA_API_KEY
+  api_base: https://integrate.api.nvidia.com/v1
+  temperature: 0.0
+  max_tokens: 1024
+
+agent:
+  max_steps: 25
+  headless: true
+  browser_channel: msedge
+  output_dir: reports

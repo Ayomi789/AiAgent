@@ -57,6 +57,47 @@ Then run the agent against it:
 .venv/Scripts/qaagent run --config config.yml
 ```
 
+### Per-site configs and shorthand names
+
+Keep one config per site (e.g. `config.solnew.yml`) and pass a short name —
+the CLI resolves `solnew` → `config.solnew.yml`, then `solnew.yml`:
+
+```bash
+.venv/Scripts/qaagent run --config solnew            # finds config.solnew.yml
+.venv/Scripts/qaagent run --config solnew --skip-llm
+.venv/Scripts/qaagent run --config config.solnew.yml  # full path still works
+```
+
+## Quick start
+
+The CLI is called **Sentinel**. Once the venv's `Scripts` folder is on your
+PATH (it is, if `sentinel --help` works in a fresh terminal), you can run it
+from any directory:
+
+```bash
+sentinel run --config solnew --skip-llm   # global command
+qaagent run --config solnew --skip-llm    # internal alias (used by CI)
+python -m sentinel run --config solnew    # module form
+```
+
+Reports always land in the same place regardless of the working directory:
+`output_dir` is resolved relative to the **config file's** folder (so the
+project's `reports/`), not the terminal's cwd.
+
+**New site? No config needed** — pass the bare domain and Sentinel creates
+`config.<domain>.yml` for you and scans it:
+
+```bash
+sentinel run --config stylesbytiwa.netlify.app --skip-llm
+# -> creates config.stylesbytiwa.netlify.app.yml (auto-scoped to the site)
+```
+
+Or create it explicitly (then edit in credentials / sensitive files):
+
+```bash
+sentinel init-config --name stylesbytiwa --target https://stylesbytiwa.netlify.app
+```
+
 ## Watch a run live (dashboard)
 
 Start the dashboard in one terminal, then run the agent in another:

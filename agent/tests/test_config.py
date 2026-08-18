@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from qaagent.cli import _derive_target, _resolve_config
 from qaagent.config import RunConfig, ScopeConfig
 from qaagent.tools.impl import _in_scope
 
@@ -121,3 +122,43 @@ def test_sensitive_files_path_must_start_with_slash():
                 "sensitive_files": {"secrets.tar.gz": "archive"},
             }
         )
+
+
+def test_config_shorthand_resolves(tmp_path, monkeypatch):
+    (tmp_path / "config.solnew.yml").write_text("target: http://x.test", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert _resolve_config(Path("solnew")).resolve() == (tmp_path / "config.solnew.yml").resolve()
+
+
+def test_config_shorthand_plain_name(tmp_path, monkeypatch):
+    (tmp_path / "solnew.yml").write_text("target: http://x.test", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert _resolve_config(Path("solnew")).resolve() == (tmp_path / "solnew.yml").resolve()
+
+
+def test_config_shorthand_exact_path_wins(tmp_path, monkeypatch):
+    (tmp_path / "myconfig.yml").write_text("target: http://x.test", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert _resolve_config(Path("myconfig.yml")).resolve() == (tmp_path / "myconfig.yml").resolve()
+
+
+def test_config_shorthand_missing_raises(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        _resolve_config(Path("doesnotexist"))
+
+
+def test_derive_target_from_bare_domain():
+    assert _derive_target("stylesbytiwa.netlify.app") == "https://stylesbytiwa.netlify.app"
+    assert _derive_target("mysite.io") == "https://mysite.io"
+
+
+def test_derive_target_keeps_full_url():
+    assert _derive_target("https://x.io/path") == "https://x.io/path"
+
+
+def test_derive_target_rejects_non_domains():
+    assert _derive_target("solnew") is None
+    assert _derive_target("config.yml") is None
+    assert _derive_target("config.foo") is None
+    assert _derive_target("my site") is None

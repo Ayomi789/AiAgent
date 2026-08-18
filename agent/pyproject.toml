@@ -29,9 +29,10 @@ targets = [
 
 [project.scripts]
 qaagent = "qaagent.cli:app"
+sentinel = "qaagent.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/qaagent"]
+packages = ["src/qaagent", "src/sentinel"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

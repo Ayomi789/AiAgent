@@ -19,7 +19,7 @@ from qaagent.models import FindingCategory, Report, Severity
 from qaagent.probe.active import run_active_probe
 from qaagent.probe.passive import run_passive_probe
 from qaagent.report.collector import Collector
-from qaagent.report.generator import save_report, save_report_json, save_summary
+from qaagent.report.generator import save_report, save_report_csv, save_report_html, save_report_json, save_summary
 from qaagent.tools.impl import (
     build_registry,
     build_tool_specs,
@@ -156,6 +156,8 @@ class Agent:
             report.status = "completed"
             self.report_path = str(save_report(report, self.config.output_dir))
             self.report_json_path = str(save_report_json(report, self.config.output_dir))
+            save_report_html(report, self.config.output_dir)
+            save_report_csv(report, self.config.output_dir)
             save_summary(
                 report, self.config.output_dir, self.report_path, self.report_json_path
             )

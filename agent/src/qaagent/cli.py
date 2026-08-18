@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from qaagent.agent.core import Agent
-from qaagent.config import RunConfig
+from qaagent.config import RunConfig, ScopeConfig
 from qaagent.models import SEVERITY_ORDER, Report, Severity
 from qaagent.report.diff import compare_reports, previous_report
 from qaagent.report.generator import save_report
@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover
     load_dotenv = None
 
 app = typer.Typer(
-    name="qaagent",
+    name="Sentinel",
     help="AI agent that tests websites and apps for vulnerabilities, bugs, and functionality.",
     no_args_is_help=True,
 )
@@ -73,13 +73,124 @@ def _load_env() -> None:
     load_dotenv(override=False)
 
 
+def _resolve_config(path: Path) -> Path:
+    """Resolve a config path with shorthand aliases.
+
+    Given "solnew" tries (in order):
+      1. solnew          (exact path as given)
+      2. config.solnew.yml
+      3. solnew.yml
+      4. config.solnew
+    If none of those exist in the current directory, the project root
+    (agent/) is searched the same way, so `sentinel run --config solnew`
+    works from anywhere on the machine.
+    Raises FileNotFoundError with a helpful message if none match.
+    """
+    candidates = [path, Path(f"config.{path}.yml"), Path(f"{path}.yml"), Path(f"config.{path}")]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    # Fall back to the project root (where the CLI ships), so the command
+    # works from any working directory once `sentinel` is on PATH.
+    project_root = Path(__file__).resolve().parents[2]
+    for candidate in candidates:
+        rooted = project_root / candidate
+        if rooted.exists():
+            return rooted
+    tried = ", ".join(str(p) for p in candidates)
+    raise FileNotFoundError(
+        f"Config file not found. Tried (cwd + {project_root}): {tried}"
+    )
+
+
+def _derive_target(name: str) -> str | None:
+    """Derive a target URL from a bare site name, or None if it isn't one.
+
+    "stylesbytiwa.netlify.app" -> "https://stylesbytiwa.netlify.app"
+    "https://x.io/path"        -> "https://x.io/path"
+    "solnew"                   -> None (no dot - not a domain)
+    "config.yml" / "config.x"  -> None (already a config name)
+    """
+    low = name.lower()
+    if low.startswith(("http://", "https://")):
+        return name.rstrip("/")
+    if low.endswith((".yml", ".yaml")) or low.startswith("config."):
+        return None
+    if "." in name and "/" not in name:
+        return f"https://{name}".rstrip("/")
+    return None
+
+
+_AUTO_CONFIG_TEMPLATE = """\
+# Sentinel config for {target} (auto-generated - edit freely).
+# Add test credentials or extra sensitive_files here if you have them.
+
+target: {target}
+
+scope:
+  allowed_origins: []        # empty = auto-scope to the target's origin
+  excluded_paths: []
+  max_requests_per_minute: 30
+  timeout_seconds: 30
+
+llm:
+  model: meta/llama-3.3-70b-instruct
+  api_key_env: NVIDIA_API_KEY
+  api_base: https://integrate.api.nvidia.com/v1
+  temperature: 0.0
+  max_tokens: 1024
+
+agent:
+  max_steps: 25
+  headless: true
+  browser_channel: msedge
+  output_dir: reports
+"""
+
+
+def _auto_create_config(name: str, target: str) -> Path:
+    """Write a per-site config for a bare site name and return its path."""
+    project_root = Path(__file__).resolve().parents[2]
+    path = project_root / f"config.{name}.yml"
+    path.write_text(
+        _AUTO_CONFIG_TEMPLATE.format(target=target), encoding="utf-8"
+    )
+    return path
+
+
 @app.command()
 def init_config(
     path: Path = typer.Option(
         Path("config.yml"), "--path", "-o", help="Where to write the example config."
     ),
+    name: str | None = typer.Option(
+        None, "--name", help="Site name: writes config.<name>.yml (e.g. --name solnew)."
+    ),
+    target: str | None = typer.Option(
+        None, "--target", "-t", help="Target URL for the new config."
+    ),
 ) -> None:
-    """Write an example config file to get started."""
+    """Write an example config file to get started.
+
+    With --name (and optionally --target) this writes a per-site config:
+    `sentinel init-config --name solnew --target https://sol.new`.
+    """
+    if name is not None:
+        path = Path(f"config.{name}.yml")
+        site_target = target or _derive_target(name)
+        if site_target is None:
+            console.print(
+                f"[red]Cannot derive a URL from '{name}'. "
+                f"Pass --target <url> too.[/red]"
+            )
+            raise typer.Exit(code=2)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_AUTO_CONFIG_TEMPLATE.format(target=site_target), encoding="utf-8")
+        console.print(
+            f"[green]Wrote per-site config to[/green] [cyan]{path}[/cyan] "
+            f"(target: {site_target})"
+        )
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(EXAMPLE_CONFIG, encoding="utf-8")
     console.print(f"[green]Wrote example config to[/green] [cyan]{path}[/cyan]")
@@ -144,11 +255,48 @@ def run(
 ) -> None:
     """Run the agent against a target and write a report."""
     _load_env()
+    config_path: Path | None = None
     try:
-        cfg = RunConfig.from_yaml(config)
-    except ValueError as exc:
-        console.print(f"[red]Config error:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
+        config_path = _resolve_config(config)
+    except FileNotFoundError:
+        config_path = None
+
+    if config_path is not None:
+        try:
+            cfg = RunConfig.from_yaml(config_path)
+        except ValueError as exc:
+            console.print(f"[red]Config error:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
+        # Reports go next to the config file, so `sentinel run --config X`
+        # writes to the same place no matter which directory it's run from.
+        if not cfg.output_dir.is_absolute():
+            cfg.output_dir = config_path.parent / cfg.output_dir
+    elif target is not None:
+        # No config file at all, but an explicit target: run with defaults
+        # (empty scope auto-targets the target's origin).
+        console.print(
+            "[yellow]No config file found - using defaults with auto-scope.\n"
+            f"Create one with: sentinel init-config --name <site> --target {target}[/yellow]"
+        )
+        cfg = RunConfig(target=target, scope=ScopeConfig(allowed_origins=[]))
+    else:
+        # Bare site name with no config: auto-create one, e.g.
+        # `sentinel run --config stylesbytiwa.netlify.app`.
+        derived = _derive_target(str(config))
+        if derived is not None:
+            created = _auto_create_config(str(config), derived)
+            console.print(
+                f"[green]Created config [cyan]{created}[/cyan] for {derived} "
+                "(edit it to add credentials/sensitive_files).[/green]"
+            )
+            cfg = RunConfig.from_yaml(created)
+        else:
+            console.print(
+                f"[red]No config file for '{config}'.[/red]\n"
+                f"  - Scan directly: sentinel run --target <url> --skip-llm\n"
+                f"  - Save a config: sentinel init-config --name {config} --target <url>"
+            )
+            raise typer.Exit(code=1)
 
     overrides: dict = {}
     if target is not None:
