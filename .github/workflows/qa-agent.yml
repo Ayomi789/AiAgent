@@ -51,9 +51,9 @@ jobs:
     env:
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -81,7 +81,7 @@ jobs:
 
       - name: Restore baseline
         id: cache-baseline
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: baseline
           key: qa-baseline-${{ github.run_id }}
@@ -198,7 +198,7 @@ jobs:
 
       - name: Post PR comment
         if: github.event_name == 'pull_request' && always() && steps.comment.outcome == 'success'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -218,7 +218,7 @@ jobs:
 
       - name: Save baseline
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: baseline
           key: qa-baseline-${{ github.run_id }}
