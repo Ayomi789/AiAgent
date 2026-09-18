@@ -14,7 +14,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, jsonify, redirect, request, session, url_for
+from flask import Flask, jsonify, redirect, request, send_file, session, url_for
 
 from qaagent.auth import (
     RateLimiter,
@@ -119,7 +119,7 @@ def load_or_create_token(reports_dir: Path) -> str:
     token_path.write_text(token, encoding="utf-8")
     return token
 
-_PAGE = """
+_PAGE = r"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -608,6 +608,7 @@ _PAGE = """
       grid-template-areas:
         "findings diff"
         "findings actions"
+        "findings history"
         "report report";
       gap: 12px;
     }
@@ -615,6 +616,7 @@ _PAGE = """
     .findings-panel { grid-area: findings; }
     .diff-panel { grid-area: diff; }
     .actions-panel { grid-area: actions; }
+    .history-panel { grid-area: history; }
     .report-panel { grid-area: report; }
 
     .panel {
@@ -977,42 +979,88 @@ _PAGE = """
       color: var(--faint);
       font-size: 11px;
       letter-spacing: 0.04em;
+    }    .foot span { font-family: var(--mono); }
+
+    .dl-row {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 10px 18px 0;
     }
+    .dl-row .dl-label {
+      font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--faint); font-family: var(--mono); margin-right: 2px;
+    }
+    .dl-btn {
+      appearance: none; display: inline-flex; align-items: center; gap: 5px;
+      height: 24px; padding: 0 10px; border-radius: 999px; cursor: pointer;
+      border: 1px solid var(--line-2); background: transparent;
+      color: var(--muted); font-family: var(--mono); font-size: 9.5px;
+      letter-spacing: 0.08em; text-transform: uppercase; text-decoration: none;
+      transition: color .15s ease, border-color .15s ease, background .15s ease;
+    }
+    .dl-btn:hover {
+      color: var(--mint); border-color: rgba(46, 230, 166, 0.4);
+      background: rgba(46, 230, 166, 0.07);
+    }
+    .dl-btn:active { transform: translateY(1px); }
+    .dl-btn .ext { opacity: 0.6; }
 
-    .foot span { font-family: var(--mono); }
+    .hist-wrap { padding: 4px 18px 14px; overflow: auto; }
+    .hist-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 8px 0; border-top: 1px solid var(--line);
+      font-family: var(--mono); font-size: 11px;
+    }
+    .hist-row:first-child { border-top: none; }
+    .hist-row .h-target {
+      flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; color: var(--text);
+    }
+    .hist-row .h-when { flex: none; color: var(--faint); font-size: 10px; }
+    .hist-row .h-count { flex: none; color: var(--muted); font-size: 10px; }
+    .hist-row .h-dl { flex: none; display: inline-flex; gap: 5px; }
+    .hist-row .h-dl a {
+      color: var(--muted); text-decoration: none; font-size: 9px;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      border: 1px solid var(--line-2); border-radius: 999px; padding: 2px 8px;
+      transition: color .15s ease, border-color .15s ease;
+    }
+    .hist-row .h-dl a:hover {
+      color: var(--mint); border-color: rgba(46, 230, 166, 0.4);
+    }
+    .hist-empty { color: var(--faint); font-size: 11.5px; padding: 10px 0; }
 
-    .user-chip {{
+    .user-chip {
       display: inline-flex; align-items: center; gap: 9px;
       height: 34px; padding: 0 6px 0 7px; border-radius: 999px;
       border: 1px solid var(--line-2);
       background: linear-gradient(180deg, var(--surface-2), var(--surface));
       box-shadow: inset 0 1px 0 rgba(232, 237, 244, 0.04);
       transition: border-color .18s ease, box-shadow .18s ease;
-    }}
-    .user-chip:hover {{
+    }
+    .user-chip:hover {
       border-color: rgba(46, 230, 166, 0.28);
       box-shadow: inset 0 1px 0 rgba(232, 237, 244, 0.04), 0 0 0 3px rgba(46, 230, 166, 0.05);
-    }}
-    .user-chip .avatar {{
+    }
+    .user-chip .avatar {
       width: 22px; height: 22px; border-radius: 50%; flex: none;
       display: inline-flex; align-items: center; justify-content: center;
       font-family: var(--mono); font-size: 10px; font-weight: 700;
       color: var(--mint); text-transform: uppercase;
       background: radial-gradient(circle at 30% 30%, rgba(46,230,166,0.28), rgba(46,230,166,0.07));
       border: 1px solid rgba(46, 230, 166, 0.35);
-    }}
-    .user-chip .u {{
+    }
+    .user-chip .u {
       font-size: 11px; color: var(--text); font-family: var(--mono);
       max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }}
-    .user-chip .role {{
+    }
+    .user-chip .role {
       flex: none; font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase;
       font-family: var(--mono); color: var(--mint);
       border: 1px solid rgba(46, 230, 166, 0.35); background: rgba(46, 230, 166, 0.08);
       padding: 2.5px 8px; border-radius: 999px;
-    }}
-    .user-chip form {{ display: inline-flex; margin: 0; }}
-    .user-chip button {{
+    }
+    .user-chip form { display: inline-flex; margin: 0; }
+    .user-chip button {
       appearance: none; display: inline-flex; align-items: center; gap: 6px;
       height: 22px; padding: 0 11px; border-radius: 999px; cursor: pointer;
       border: 1px solid var(--line-2); background: transparent;
@@ -1020,22 +1068,22 @@ _PAGE = """
       letter-spacing: 0.1em; text-transform: uppercase;
       transition: color .16s ease, border-color .16s ease, background .16s ease,
                   box-shadow .16s ease, transform .1s ease;
-    }}
-    .user-chip button svg {{ opacity: 0.75; flex: none; transition: opacity .16s ease; }}
-    .user-chip button:hover {{
+    }
+    .user-chip button svg { opacity: 0.75; flex: none; transition: opacity .16s ease; }
+    .user-chip button:hover {
       color: #ff5c76; border-color: rgba(255, 59, 92, 0.45);
       background: rgba(255, 59, 92, 0.09);
       box-shadow: 0 0 0 3px rgba(255, 59, 92, 0.07);
-    }}
-    .user-chip button:hover svg {{ opacity: 1; }}
-    .user-chip button:active {{ transform: translateY(1px) scale(0.98); }}
-    .user-chip button:focus-visible {{
+    }
+    .user-chip button:hover svg { opacity: 1; }
+    .user-chip button:active { transform: translateY(1px) scale(0.98); }
+    .user-chip button:focus-visible {
       outline: 2px solid rgba(255, 59, 92, 0.5); outline-offset: 2px;
-    }}
+    }
 
-    @media (max-width: 640px) {{
-      .user-chip {{ height: 30px; gap: 7px; }}
-      .user-chip .u, .user-chip .role {{ display: none; }}
+    @media (max-width: 640px) {
+      .user-chip { height: 30px; gap: 7px; }
+      .user-chip .u, .user-chip .role { display: none; }
     }}
 
     @keyframes scan {
@@ -1193,9 +1241,26 @@ _PAGE = """
         <div id="actions"></div>
       </section>
 
+      <section class="panel history-panel">
+        <div class="panel-head">
+          <h2>Report history</h2>
+        </div>
+        <div class="hist-wrap" id="history">
+          <div class="hist-empty">Loading run history…</div>
+        </div>
+      </section>
+
       <section class="panel report-panel">
         <div class="panel-head">
           <h2>Final report</h2>
+        </div>
+        <div class="dl-row" id="dl-row" hidden>
+          <span class="dl-label">Download</span>
+          <a class="dl-btn" id="dl-html" href="#" download>HTML <span class="ext">.html</span></a>
+          <a class="dl-btn" id="dl-md" href="#" download>Markdown <span class="ext">.md</span></a>
+          <a class="dl-btn" id="dl-csv" href="#" download>CSV <span class="ext">.csv</span></a>
+          <a class="dl-btn" id="dl-json" href="#" download>JSON <span class="ext">.json</span></a>
+          <a class="dl-btn" id="dl-testio" href="#" download>Test IO <span class="ext">.zip</span></a>
         </div>
         <div id="report"></div>
       </section>
@@ -1623,6 +1688,23 @@ _PAGE = """
 
       function renderReport(report) {
         var md = report && (report.markdown || report.text || "");
+        var row = document.getElementById("dl-row");
+        var stamp = null;
+        if (report && report.path) {
+          var m = String(report.path).match(/report-([0-9]{8}-[0-9]{6})\.md$/);
+          if (m) stamp = m[1];
+        }
+        if (row) {
+          if (stamp) {
+            row.hidden = false;
+            ["html", "md", "csv", "json", "testio"].forEach(function (f) {
+              var a = document.getElementById("dl-" + f);
+              if (a) a.href = "/api/report/" + stamp + "/" + f;
+            });
+          } else {
+            row.hidden = true;
+          }
+        }
         if (md === lastReport) return;
         lastReport = md;
         if (!md) {
@@ -1634,6 +1716,40 @@ _PAGE = """
           return;
         }
         els.report.textContent = md;
+      }
+
+      var histLoaded = false;
+      function renderHistory(runs) {
+        var wrap = document.getElementById("history");
+        if (!wrap) return;
+        if (!runs || !runs.length) {
+          wrap.innerHTML = '<div class="hist-empty">No runs yet - scans you start will appear here with their reports.</div>';
+          return;
+        }
+        wrap.innerHTML = runs.map(function (r) {
+          var when = (r.started_at || "").replace("T", " ").slice(0, 16);
+          var st = r.stamp || "";
+          var links = ["html", "csv", "json"]
+            .map(function (f) { return '<a href="/api/report/' + st + '/' + f + '" download>' + f + '</a>'; })
+            .join("");
+          if (r.has_testio) links += '<a href="/api/report/' + st + '/testio" download>testio</a>';
+          return '<div class="hist-row">'
+            + '<span class="h-when">' + esc(when) + '</span>'
+            + '<span class="h-target">' + esc(r.target || "") + '</span>'
+            + '<span class="h-count">' + (r.finding_count || 0) + ' findings</span>'
+            + '<span class="h-dl">' + links + '</span>'
+            + '</div>';
+        }).join("");
+      }
+
+      async function loadHistory() {
+        try {
+          var res = await fetch("/api/history", { cache: "no-store" });
+          if (!res.ok) return;
+          var data = await res.json();
+          renderHistory(data.runs || []);
+          histLoaded = true;
+        } catch (err) { /* history is best-effort */ }
       }
 
       function render(state, diff, report) {
@@ -1694,6 +1810,8 @@ _PAGE = """
       setInterval(loadConfigs, 15000);
       pollScanStatus();
       setInterval(pollScanStatus, 2000);
+      loadHistory();
+      setInterval(loadHistory, 30000);
 
       poll();
       setInterval(poll, POLL_MS);
@@ -2110,6 +2228,100 @@ def create_app(
                 "counts": diff.counts,
             }
         )
+
+    _REPORT_DOWNLOADS = {
+        "md": ("report-{stamp}.md", "text/markdown; charset=utf-8"),
+        "json": ("report-{stamp}.json", "application/json"),
+        "csv": ("report-{stamp}.csv", "text/csv; charset=utf-8"),
+        "html": ("report-{stamp}.html", "text/html; charset=utf-8"),
+    }
+
+    @app.get("/api/history")
+    def api_history():
+        """Past runs the viewer owns, newest first, with per-run downloads info."""
+        reports = list(reversed(_own_reports(load_report_files(reports_dir))))
+        out = []
+        for rep in reports[:50]:
+            stamp = ""
+            try:
+                started = datetime.fromisoformat(str(rep.get("started_at") or ""))
+                stamp = started.strftime("%Y%m%d-%H%M%S")
+            except ValueError:
+                stamp = ""
+            out.append(
+                {
+                    "stamp": stamp,
+                    "target": rep.get("target", ""),
+                    "started_at": rep.get("started_at"),
+                    "finished_at": rep.get("finished_at"),
+                    "status": rep.get("status"),
+                    "owner_email": rep.get("owner_email"),
+                    "summary": rep.get("summary")
+                    or rep.get("counts")
+                    or {
+                        "critical": sum(1 for f in rep.get("findings", []) if f.get("severity") == "critical"),
+                        "high": sum(1 for f in rep.get("findings", []) if f.get("severity") == "high"),
+                        "medium": sum(1 for f in rep.get("findings", []) if f.get("severity") == "medium"),
+                        "low": sum(1 for f in rep.get("findings", []) if f.get("severity") == "low"),
+                        "info": sum(1 for f in rep.get("findings", []) if f.get("severity") == "info"),
+                    },
+                    "finding_count": len(rep.get("findings", [])),
+                    "has_testio": (reports_dir / f"testio-{stamp}").is_dir() if stamp else False,
+                }
+            )
+        return jsonify({"runs": out})
+
+    @app.get("/api/report/<stamp>/<fmt>")
+    def api_report_download(stamp: str, fmt: str):
+        """Download one artifact of one run - HTML, MD, CSV, JSON, or Test IO zip.
+
+        Strict stamp validation (hex digits only) doubles as the path-traversal
+        guard; ownership is enforced before any byte leaves the server.
+        """
+        import re as _re
+
+        if not _re.fullmatch(r"[0-9a-fA-F-]{10,20}", stamp):
+            return jsonify({"error": "invalid report id"}), 400
+        fmt = fmt.lower()
+        if fmt == "testio":
+            bug_dir = reports_dir / f"testio-{stamp}"
+            if not bug_dir.is_dir():
+                return jsonify({"error": "Test IO bundle not found for this run"}), 404
+            rep_path = reports_dir / f"report-{stamp}.json"
+            try:
+                rep = json.loads(rep_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return jsonify({"error": "report metadata missing"}), 404
+            if not _owns_report(rep):
+                return jsonify({"error": "forbidden"}), 403
+            import io
+            import zipfile
+
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for child in sorted(bug_dir.rglob("*")):
+                    if child.is_file():
+                        zf.write(child, child.relative_to(bug_dir))
+            buf.seek(0)
+            return send_file(
+                buf,
+                mimetype="application/zip",
+                as_attachment=True,
+                download_name=f"testio-{stamp}.zip",
+            )
+        if fmt not in _REPORT_DOWNLOADS:
+            return jsonify({"error": "unknown format"}), 404
+        filename, mimetype = _REPORT_DOWNLOADS[fmt]
+        path = reports_dir / filename.format(stamp=stamp)
+        if not path.is_file():
+            return jsonify({"error": "file not found"}), 404
+        try:
+            rep = json.loads((reports_dir / f"report-{stamp}.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return jsonify({"error": "report metadata missing"}), 404
+        if not _owns_report(rep):
+            return jsonify({"error": "forbidden"}), 403
+        return send_file(path, mimetype=mimetype, as_attachment=True, download_name=path.name)
 
     @app.get("/api/report")
     def api_report():

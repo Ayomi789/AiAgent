@@ -7,6 +7,11 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+# Single source of truth for the model new configs get. Update here when the
+# provider retires one - the guard tests in tests/test_config.py will catch
+# any config or template that still references a retired model.
+DEFAULT_LLM_MODEL = "nvidia/nemotron-3-super-120b-a12b"
+
 
 class ScopeConfig(BaseModel):
     """Hard boundary on what the agent is allowed to touch."""
@@ -22,7 +27,7 @@ class ScopeConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM settings for any OpenAI-compatible API (NVIDIA by default)."""
 
-    model: str = "meta/llama-3.3-70b-instruct"
+    model: str = DEFAULT_LLM_MODEL
     api_key_env: str = "NVIDIA_API_KEY"
     api_base: str = "https://integrate.api.nvidia.com/v1"
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
@@ -67,6 +72,11 @@ class RunConfig(BaseModel):
             "e.g. {'/secrets.tar.gz': 'archive', '/deploy.key': 'key'}."
         ),
     )
+    # Scan ownership (dashboard multi-user isolation). The dashboard sets these
+    # via env vars when spawning the agent subprocess; plain CLI runs leave them
+    # unset, producing ownerless reports that only admins can see.
+    owner_id: int | None = None
+    owner_email: str | None = None
 
     @field_validator("sensitive_files")
     @classmethod

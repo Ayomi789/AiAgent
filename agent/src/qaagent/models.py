@@ -144,6 +144,10 @@ class Report(BaseModel):
     status: str = "completed"  # running | completed | error
     findings: list[Finding] = Field(default_factory=list)
     summary: ReportSummary | None = None
+    # Who started the scan (dashboard multi-user isolation). None = ownerless:
+    # CLI runs before accounts existed, or token/API runs - visible to admins only.
+    owner_id: int | None = None
+    owner_email: str | None = None
 
     def build_summary(self) -> ReportSummary:
         by_severity = {sev.value: 0 for sev in SEVERITY_ORDER}

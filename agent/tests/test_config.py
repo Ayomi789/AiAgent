@@ -13,6 +13,38 @@ from qaagent.tools.impl import _in_scope
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_anchor_output_dir_never_uses_cwd(tmp_path):
+    """Reports must land next to the config (or in the project), not in CWD.
+
+    The home-dir trap: running `sentinel dashboard` / `sentinel run` from
+    ~/ silently created ~/reports with its own token, users.db, and reports.
+    """
+    from qaagent.cli import _anchor_output_dir
+
+    project = tmp_path / "project"
+    project.mkdir()
+    cfg_dir = tmp_path / "elsewhere"
+    cfg_dir.mkdir()
+
+    # With a config: anchored next to the config file (its parent folder).
+    cfg = RunConfig(target="https://x.test", scope=ScopeConfig(allowed_origins=[]))
+    _anchor_output_dir(cfg, cfg_dir / "config.x.yml", project)
+    assert cfg.output_dir == cfg_dir / "reports"
+
+    # Without a config: anchored to the project.
+    cfg2 = RunConfig(target="https://x.test", scope=ScopeConfig(allowed_origins=[]))
+    _anchor_output_dir(cfg2, None, project)
+    assert cfg2.output_dir == project / "reports"
+
+    # Explicit absolute paths are respected untouched.
+    absolute = tmp_path / "custom"
+    cfg3 = RunConfig(
+        target="https://x.test", scope=ScopeConfig(allowed_origins=[]), output_dir=absolute
+    )
+    _anchor_output_dir(cfg3, cfg_dir / "config.x.yml", project)
+    assert cfg3.output_dir == absolute
+
+
 def test_example_config_loads():
     cfg = RunConfig.from_yaml(PROJECT_ROOT / "config.example.yml")
     assert cfg.target == "http://127.0.0.1:5001"
@@ -122,6 +154,56 @@ def test_sensitive_files_path_must_start_with_slash():
                 "sensitive_files": {"secrets.tar.gz": "archive"},
             }
         )
+
+
+def test_default_model_is_not_retired():
+    """Guard against shipping a model that the LLM provider has end-of-life'd.
+
+    Twice-burned: the llama-3.3-70b default outlived a model swap so every
+    newly auto-created config scanned with a dead model ('LLM API error 410'),
+    and z-ai/glm-5.3-flash stopped routing overnight ('LLM API error 404').
+    Any model confirmed dead goes on this list.
+    """
+    retired_models = (
+        "llama-3.3-70b-instruct",
+        "z-ai/glm-5.3-flash",
+    )
+    from qaagent.config import DEFAULT_LLM_MODEL
+
+    for retired in retired_models:
+        assert retired not in DEFAULT_LLM_MODEL
+
+
+def test_no_config_ships_a_retired_model():
+    """No shipped config may reference a retired model, even commented out."""
+    retired_models = (
+        "llama-3.3-70b-instruct",
+        "z-ai/glm-5.3-flash",
+    )
+    shipped = sorted(PROJECT_ROOT.glob("config*.yml"))
+    assert shipped, "expected at least one shipped config"
+    for path in shipped:
+        text = path.read_text(encoding="utf-8")
+        for retired in retired_models:
+            assert retired not in text, (
+                f"{path.name} still references retired model {retired!r}"
+            )
+
+
+def test_auto_created_config_uses_live_model():
+    """Auto-created configs must stamp the current default model, not a stale one."""
+    import yaml
+
+    from qaagent.cli import _auto_create_config
+    from qaagent.config import DEFAULT_LLM_MODEL
+
+    path = _auto_create_config("newsite.example", "https://newsite.example")
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert "llama-3.3-70b-instruct" not in data["llm"]["model"]
+        assert data["llm"]["model"] == DEFAULT_LLM_MODEL
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def test_config_shorthand_resolves(tmp_path, monkeypatch):

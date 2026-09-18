@@ -10,7 +10,7 @@ scope:
   timeout_seconds: 30
 
 llm:
-  model: meta/llama-3.3-70b-instruct
+  model: nvidia/nemotron-3-super-120b-a12b
   api_key_env: NVIDIA_API_KEY
   api_base: https://integrate.api.nvidia.com/v1
   temperature: 0.0

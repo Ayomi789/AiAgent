@@ -1,7 +1,7 @@
-# Sentinel config for https://portfolio.ife.is-a.dev (auto-generated - edit freely).
+# Sentinel config for https://apartmentlist.com (auto-generated - edit freely).
 # Add test credentials or extra sensitive_files here if you have them.
 
-target: https://portfolio.ife.is-a.dev
+target: https://apartmentlist.com
 
 scope:
   allowed_origins: []        # empty = auto-scope to the target's origin

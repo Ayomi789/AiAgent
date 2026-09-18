@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 import typer
@@ -11,7 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from qaagent.agent.core import Agent
-from qaagent.config import RunConfig, ScopeConfig
+from qaagent.config import DEFAULT_LLM_MODEL, RunConfig, ScopeConfig
 from qaagent.models import SEVERITY_ORDER, Report, Severity
 from qaagent.report.diff import compare_reports, previous_report
 from qaagent.report.generator import save_report
@@ -45,7 +46,7 @@ scope:
   timeout_seconds: 30
 
 llm:
-  model: meta/llama-3.3-70b-instruct   # any model on your OpenAI-compatible API
+  model: nvidia/nemotron-3-super-120b-a12b   # keep in sync with DEFAULT_LLM_MODEL (qaagent.config)
   api_key_env: NVIDIA_API_KEY          # env var (or agent/.env) holding the key
   api_base: https://integrate.api.nvidia.com/v1
   temperature: 0.0
@@ -134,7 +135,7 @@ scope:
   timeout_seconds: 30
 
 llm:
-  model: meta/llama-3.3-70b-instruct
+  model: nvidia/nemotron-3-super-120b-a12b
   api_key_env: NVIDIA_API_KEY
   api_base: https://integrate.api.nvidia.com/v1
   temperature: 0.0
@@ -146,6 +147,20 @@ agent:
   browser_channel: msedge
   output_dir: reports
 """
+
+
+def _anchor_output_dir(cfg: RunConfig, config_path: Path | None, project_root: Path) -> None:
+    """Anchor a relative output_dir to stable ground - never the current directory.
+
+    With a config, reports land next to that config; without one, in the
+    project's reports folder. This keeps `sentinel run` and `sentinel
+    dashboard` writing to one place no matter which directory they are
+    launched from (the home-dir trap that stranded reports in ~/reports).
+    """
+    if cfg.output_dir.is_absolute():
+        return
+    base = config_path.parent if config_path is not None else project_root
+    cfg.output_dir = base / cfg.output_dir
 
 
 def _auto_create_config(name: str, target: str) -> Path:
@@ -201,17 +216,24 @@ def dashboard(
     port: int = typer.Option(
         5050, "--port", "-p", help="Port to serve the dashboard on."
     ),
-    state: Path = typer.Option(
-        Path("reports/live.json"), "--state", help="Live state file to watch."
+    state: Path | None = typer.Option(
+        None, "--state", help="Live state file to watch (default: <project>/reports/live.json)."
     ),
-    reports: Path = typer.Option(
-        Path("reports"), "--reports", help="Directory containing report-*.md files."
+    reports: Path | None = typer.Option(
+        None, "--reports", help="Directory containing report-*.md files (default: <project>/reports)."
     ),
 ) -> None:
-    """Serve the live dashboard (http://127.0.0.1:<port>)."""
+    """Serve the live dashboard (http://127.0.0.1:<port>).
+
+    Defaults are anchored to the project folder, not the current directory,
+    so accounts, the access token, sessions, and reports are the same no
+    matter where `sentinel dashboard` is launched from.
+    """
     from qaagent.dashboard import load_or_create_token, run_dashboard
 
     project_root = Path(__file__).resolve().parents[2]
+    reports = reports or (project_root / "reports")
+    state = state or (reports / "live.json")
     reports.mkdir(parents=True, exist_ok=True)
     token = load_or_create_token(reports)
     url = f"http://127.0.0.1:{port}/?token={token}"
@@ -273,10 +295,6 @@ def run(
         except ValueError as exc:
             console.print(f"[red]Config error:[/red] {exc}")
             raise typer.Exit(code=1) from exc
-        # Reports go next to the config file, so `sentinel run --config X`
-        # writes to the same place no matter which directory it's run from.
-        if not cfg.output_dir.is_absolute():
-            cfg.output_dir = config_path.parent / cfg.output_dir
     elif target is not None:
         # No config file at all, but an explicit target: run with defaults
         # (empty scope auto-targets the target's origin).
@@ -296,6 +314,7 @@ def run(
                 "(edit it to add credentials/sensitive_files).[/green]"
             )
             cfg = RunConfig.from_yaml(created)
+            config_path = created
         else:
             console.print(
                 f"[red]No config file for '{config}'.[/red]\n"
@@ -303,6 +322,11 @@ def run(
                 f"  - Save a config: sentinel init-config --name {config} --target <url>"
             )
             raise typer.Exit(code=1)
+
+    # Reports go next to the config file (or in the project when no config
+    # exists), so scans write to the same place no matter where they run from.
+    project_root = Path(__file__).resolve().parents[2]
+    _anchor_output_dir(cfg, config_path, project_root)
 
     overrides: dict = {}
     if target is not None:
@@ -313,6 +337,12 @@ def run(
         overrides["max_steps"] = max_steps
     if skip_llm:
         overrides["skip_llm"] = True
+    # Scan ownership: the dashboard passes the logged-in starter via env vars
+    # when spawning this process, so each account's scans stay isolated.
+    env_owner_id = os.environ.get("SENTINEL_OWNER_ID")
+    if env_owner_id and env_owner_id.isdigit():
+        overrides["owner_id"] = int(env_owner_id)
+        overrides["owner_email"] = os.environ.get("SENTINEL_OWNER_EMAIL") or None
     if overrides:
         cfg = RunConfig.model_validate({**cfg.model_dump(), **overrides})
 

@@ -441,3 +441,172 @@ def test_live_state_roundtrip(tmp_path):
     assert data["recent_actions"] == ["click Login"]
     assert data["target"] == "http://x.test"
     assert data["report_path"] == "reports/x.md"
+
+
+def _signup(client, email: str) -> None:
+    """Create an account through the real signup form (CSRF included)."""
+    import re
+
+    html = client.get("/signup").get_data(as_text=True)
+    csrf = re.search(r'name="csrf_token" value="([^"]+)"', html).group(1)
+    resp = client.post(
+        "/signup",
+        data={"email": email, "password": "supersecret9", "csrf_token": csrf},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+
+
+def test_reports_isolated_between_accounts(tmp_path):
+    """Each account sees only its own scans; admins and tokens see everything."""
+    from qaagent.dashboard import _scan, create_app
+
+    # Seed: a member-owned report and an ownerless one (CLI/pre-accounts runs).
+    # Pairs of .md + .json, matching what a real run writes to disk.
+    for name, owner in (
+        ("20260101-000001", {"owner_id": 2, "owner_email": "member@example.com"}),
+        ("20260101-000002", {}),
+    ):
+        (tmp_path / f"report-{name}.md").write_text("# report", encoding="utf-8")
+        (tmp_path / f"report-{name}.json").write_text(
+            json.dumps(
+                {
+                    "target": "http://x.test",
+                    "started_at": f"{name[:4]}-{name[4:6]}-{name[6:8]}T00:00:00+00:00",
+                    "findings": [],
+                    **owner,
+                }
+            ),
+            encoding="utf-8",
+        )
+    (tmp_path / "live.json").write_text(
+        json.dumps({"status": "running", "stage": "Exploring", "findings": []}),
+        encoding="utf-8",
+    )
+
+    app = create_app(tmp_path / "live.json", tmp_path, auth_token="tok")
+    saved_owner = (_scan.get("owner_id"), _scan.get("owner_email"))
+    _scan.update(owner_id=1, owner_email="admin@example.com")
+    try:
+        admin = app.test_client()
+        _signup(admin, "admin@example.com")  # first user -> admin
+
+        # Admin sees everything: the newest report (ownerless) is visible.
+        rep = json.loads(admin.get("/api/report").get_data(as_text=True))
+        assert rep["path"] is not None and "000002" in rep["path"]
+        # Admin sees the real live state.
+        st = json.loads(admin.get("/api/state").get_data(as_text=True))
+        assert st["status"] == "running"
+
+        member = app.test_client()
+        _signup(member, "member@example.com")  # second user -> regular
+
+        # Member sees only their own report (the ownerless one is hidden).
+        rep2 = json.loads(member.get("/api/report").get_data(as_text=True))
+        assert rep2["path"] is not None and "000001" in rep2["path"]
+        # Live state: admin's running scan is invisible to the member...
+        st2 = json.loads(member.get("/api/state").get_data(as_text=True))
+        assert st2["status"] == "idle"
+        # ...but visible once the member owns the running scan.
+        _scan.update(owner_id=2, owner_email="member@example.com")
+        st3 = json.loads(member.get("/api/state").get_data(as_text=True))
+        assert st3["status"] == "running"
+        _scan.update(owner_id=1, owner_email="admin@example.com")
+
+        # A third account starts completely clean.
+        third = app.test_client()
+        _signup(third, "third@example.com")
+        rep3 = json.loads(third.get("/api/report").get_data(as_text=True))
+        assert rep3["path"] is None
+        st4 = json.loads(third.get("/api/state").get_data(as_text=True))
+        assert st4["status"] == "idle"
+
+        # The bootstrap token still sees everything (admin/API mechanism).
+        tok = app.test_client()
+        rep4 = json.loads(tok.get("/api/report?token=tok").get_data(as_text=True))
+        assert rep4["path"] is not None and "000002" in rep4["path"]
+    finally:
+        _scan.update(owner_id=saved_owner[0], owner_email=saved_owner[1])
+
+
+def test_report_downloads_and_history(tmp_path):
+    """Downloads and history are served per-run, ownership-checked, traversal-safe."""
+    import io
+    import zipfile
+
+    from qaagent.dashboard import _scan, create_app
+
+    stamp = "20260101-000000"  # matches started_at 2026-01-01T00:00:00
+    (tmp_path / f"report-{stamp}.json").write_text(
+        json.dumps(
+            {
+                "target": "http://x.test",
+                "started_at": "2026-01-01T00:00:00+00:00",
+                "owner_id": 2,
+                "owner_email": "member@example.com",
+                "findings": [{"title": "T", "severity": "low", "url": "http://x.test"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    for ext, body in (("md", "# report"), ("csv", "a,b\n1,2"), ("html", "<h1>r</h1>")):
+        (tmp_path / f"report-{stamp}.{ext}").write_text(body, encoding="utf-8")
+    bug_dir = tmp_path / f"testio-{stamp}"
+    bug_dir.mkdir()
+    (bug_dir / "00-INDEX.md").write_text("# index", encoding="utf-8")
+    (tmp_path / "live.json").write_text(json.dumps({"status": "idle"}), encoding="utf-8")
+
+    app = create_app(tmp_path / "live.json", tmp_path, auth_token="tok")
+    saved_owner = (_scan.get("owner_id"), _scan.get("owner_email"))
+    _scan.update(owner_id=1, owner_email="admin@example.com")
+    try:
+        admin = app.test_client()
+        _signup(admin, "admin@example.com")  # first user -> admin
+
+        # History lists the run with a Test IO flag.
+        hist = json.loads(admin.get("/api/history").get_data(as_text=True))
+        assert len(hist["runs"]) == 1
+        run = hist["runs"][0]
+        assert run["stamp"] == stamp and run["has_testio"] is True
+
+        # All four file downloads work for the owner (admin sees all).
+        for fmt, marker in (("md", b"# report"), ("csv", b"a,b"), ("html", b"<h1>"), ("json", b"x.test")):
+            r = admin.get(f"/api/report/{stamp}/{fmt}")
+            assert r.status_code == 200, fmt
+            assert marker in r.data
+        # Zip contains the Test IO bundle.
+        z = admin.get(f"/api/report/{stamp}/testio")
+        assert z.status_code == 200 and z.data[:2] == b"PK"
+        names = zipfile.ZipFile(io.BytesIO(z.data)).namelist()
+        assert "00-INDEX.md" in names
+
+        # The owning member can download their own run's artifacts.
+        member = app.test_client()
+        _signup(member, "member@example.com")
+        r = member.get(f"/api/report/{stamp}/md")
+        assert r.status_code == 200 and b"# report" in r.data
+        hist2 = json.loads(member.get("/api/history").get_data(as_text=True))
+        assert len(hist2["runs"]) == 1
+
+        # A non-owner is blocked on every artifact.
+        third = app.test_client()
+        _signup(third, "third@example.com")
+        for fmt in ("md", "csv", "html", "json", "testio"):
+            r = third.get(f"/api/report/{stamp}/{fmt}")
+            assert r.status_code == 403, fmt
+        # ...and history shows them nothing.
+        hist3 = json.loads(third.get("/api/history").get_data(as_text=True))
+        assert hist3["runs"] == []
+
+        # Path traversal and malformed ids are rejected before touching disk.
+        for bad in ("..%2F..%2Fetc", "../../etc", "x/y", "", "zzzz"):
+            r = admin.get(f"/api/report/{bad}/md")
+            assert r.status_code in (400, 404), bad
+
+        # Unknown format -> 404.
+        assert admin.get(f"/api/report/{stamp}/exe").status_code == 404
+        # Missing artifact -> 404 (owner would pass the ownership check).
+        missing = admin.get("/api/report/19990101-000000/md")
+        assert missing.status_code == 404
+    finally:
+        _scan.update(owner_id=saved_owner[0], owner_email=saved_owner[1])

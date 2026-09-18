@@ -47,7 +47,13 @@ class Agent:
 
     async def run(self) -> Report:
         started = datetime.now(timezone.utc)
-        report = Report(target=self.config.target, started_at=started, status="running")
+        report = Report(
+            target=self.config.target,
+            started_at=started,
+            status="running",
+            owner_id=self.config.owner_id,
+            owner_email=self.config.owner_email,
+        )
         collector = Collector()
         live = LiveState(self.config.output_dir / "live.json")
         live.update(
