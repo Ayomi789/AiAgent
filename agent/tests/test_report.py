@@ -6,14 +6,16 @@ import json
 from datetime import datetime, timezone
 
 from qaagent.live import LiveState
-from qaagent.models import Finding, FindingCategory, Report, Severity
+from qaagent.models import Evidence, Finding, FindingCategory, Report, Severity
 from qaagent.report.generator import (
     render_html,
     render_markdown,
+    render_testio_bug,
     save_report,
     save_report_csv,
     save_report_html,
     save_report_json,
+    save_report_testio,
     save_summary,
 )
 
@@ -31,6 +33,76 @@ def _report() -> Report:
     )
     report.summary = report.build_summary()
     return report
+
+
+def _testio_report() -> Report:
+    now = datetime.now(timezone.utc)
+    finding = Finding(
+        title="Reflected XSS in /search",
+        severity=Severity.HIGH,
+        category=FindingCategory.SECURITY,
+        description="Payload '<script>alert(1)</script>' is echoed back unescaped.",
+        url="http://x.test/search?q=<script>",
+        remediation="Escape all user input when rendering.",
+        evidence=[
+            Evidence(kind="http_response", detail="payload reflected in 200 response"),
+            Evidence(kind="screenshot", file="shot.png"),
+        ],
+        detected_at=now,
+    )
+    report = Report(target="http://x.test", started_at=now, finished_at=now, findings=[finding])
+    report.summary = report.build_summary()
+    return report
+
+
+def test_testio_bug_has_all_required_fields():
+    text = render_testio_bug(_testio_report(), _testio_report().findings[0])
+    for field in (
+        "**Feature:**",
+        "**Severity:** High",
+        "**Title:**",
+        "**URL:**",
+        "## Steps to reproduce",
+        "## Actual result",
+        "## Expected result",
+        "## Attachment",
+        "## Used environment",
+    ):
+        assert field in text, f"missing {field!r}"
+
+
+def test_testio_bug_step1_opens_target():
+    """Test IO requires step 1 to be opening the site root."""
+    report = _testio_report()
+    text = render_testio_bug(report, report.findings[0])
+    assert "1. Open http://x.test" in text
+
+
+def test_testio_severity_mapping():
+    """Only Low/High/Critical exist in Test IO; info/medium/low map to Low."""
+    from qaagent.report.generator import _TESTIO_SEVERITY
+
+    assert _TESTIO_SEVERITY["critical"] == "Critical"
+    assert _TESTIO_SEVERITY["high"] == "High"
+    assert _TESTIO_SEVERITY["medium"] == "Low"
+    assert _TESTIO_SEVERITY["info"] == "Low"
+
+
+def test_save_report_testio_writes_per_finding_files():
+    import tempfile
+    from pathlib import Path
+
+    report = _testio_report()
+    with tempfile.TemporaryDirectory() as tmp:
+        bug_dir = save_report_testio(report, tmp)
+        files = sorted(Path(bug_dir).glob("*.md"))
+        # one per finding + the index
+        assert len(files) == 2
+        assert (Path(bug_dir) / "00-INDEX.md").exists()
+        per_finding = [f for f in files if f.name != "00-INDEX.md"][0]
+        content = per_finding.read_text(encoding="utf-8")
+        assert "Test IO format" in content
+        assert "high" in per_finding.name  # severity in the filename
 
 
 def test_render_html_ranks_by_severity():

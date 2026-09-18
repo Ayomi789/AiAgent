@@ -19,7 +19,14 @@ from qaagent.models import FindingCategory, Report, Severity
 from qaagent.probe.active import run_active_probe
 from qaagent.probe.passive import run_passive_probe
 from qaagent.report.collector import Collector
-from qaagent.report.generator import save_report, save_report_csv, save_report_html, save_report_json, save_summary
+from qaagent.report.generator import (
+    save_report,
+    save_report_csv,
+    save_report_html,
+    save_report_json,
+    save_report_testio,
+    save_summary,
+)
 from qaagent.tools.impl import (
     build_registry,
     build_tool_specs,
@@ -36,6 +43,7 @@ class Agent:
         self.config = config
         self.report_path: str | None = None
         self.report_json_path: str | None = None
+        self.testio_dir: str | None = None
 
     async def run(self) -> Report:
         started = datetime.now(timezone.utc)
@@ -158,6 +166,8 @@ class Agent:
             self.report_json_path = str(save_report_json(report, self.config.output_dir))
             save_report_html(report, self.config.output_dir)
             save_report_csv(report, self.config.output_dir)
+            testio_dir = save_report_testio(report, self.config.output_dir)
+            self.testio_dir = str(testio_dir)
             save_summary(
                 report, self.config.output_dir, self.report_path, self.report_json_path
             )

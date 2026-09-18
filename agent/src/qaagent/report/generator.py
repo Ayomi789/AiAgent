@@ -225,6 +225,123 @@ def save_report_csv(report: Report, output_dir: str | Path) -> Path:
     return path
 
 
+# --- Test IO-style bug reports -------------------------------------------
+
+# Test IO functional-bug severities are Low / High / Critical only. Map our
+# five-level scale onto theirs the way their team leaders judge bugs.
+_TESTIO_SEVERITY = {
+    "critical": "Critical",
+    "high": "High",
+    "medium": "Low",
+    "low": "Low",
+    "info": "Low",
+}
+
+
+def render_testio_bug(report: Report, finding) -> str:
+    """Render one finding as a Test IO-style bug report.
+
+    Field order and phrasing follow Test IO's Bug Report Requirements:
+    Feature / Severity / Title / URL / Steps to reproduce / Actual result /
+    Expected result / Attachment / Used environment.
+    """
+    ev_http = [e for e in finding.evidence if e.kind == "http_response"]
+    ev_other = [e for e in finding.evidence if e.kind != "http_response"]
+
+    # Steps to reproduce: step 1 opens the target (their rule), then the
+    # finding's URL + probe actions from the evidence chain.
+    steps = [f"Open {report.target}"]
+    if finding.url and finding.url != report.target:
+        steps.append(f"Navigate to {finding.url}")
+    for e in ev_http:
+        if e.detail:
+            steps.append(f"Send the request: {e.detail}")
+    if len(steps) == 1:
+        steps.append("Open the affected URL")
+
+    # Actual result: the finding description plus concrete observed responses.
+    actual_lines = [finding.description] if finding.description else []
+    for e in ev_http:
+        if e.detail:
+            actual_lines.append(f"Observed response: {e.detail}")
+    if finding.content_type:
+        actual_lines.append(f"Response Content-Type: {finding.content_type}")
+    actual = " ".join(actual_lines) if actual_lines else finding.title
+
+    # Expected result: derived from the finding's remediation (the secure
+    # behavior), phrased as what the app should do rather than what it fails
+    # to do — their rule that actual/expected must not be mirror images.
+    expected = finding.remediation or (
+        "The application should handle this request securely and "
+        "return the expected response without exposing unintended behavior."
+    )
+
+    lines = [
+        "# Bug report (Test IO format)",
+        "",
+        f"- **Feature:** Security / Stability",
+        f"- **Severity:** {_TESTIO_SEVERITY.get(finding.severity.value, 'Low')}",
+        f"- **Title:** {finding.title}",
+        f"- **URL:** {finding.url or report.target}",
+        "",
+        "## Steps to reproduce",
+    ]
+    for i, step in enumerate(steps, 1):
+        lines.append(f"{i}. {step}")
+    lines += [
+        "",
+        "## Actual result",
+        actual,
+        "",
+        "## Expected result",
+        expected,
+        "",
+        "## Attachment",
+    ]
+    if ev_other or ev_http:
+        lines.append("Attach the evidence captured by Sentinel:")
+        for e in ev_other + ev_http:
+            detail = e.detail or e.url or e.file or ""
+            lines.append(f"- [{e.kind}] {detail}")
+    else:
+        lines.append("_No attachment captured — add a screenshot of the observed behavior._")
+    lines += [
+        "",
+        "## Used environment",
+        "- Device/Browser: Chromium (Playwright headless)",
+        f"- Tested URL: {report.target}",
+        f"- Detected: {finding.detected_at.strftime('%Y-%m-%d %H:%M UTC')}",
+    ]
+    return "\n".join(lines)
+
+
+def save_report_testio(report: Report, output_dir: str | Path) -> Path:
+    """Write Test IO-style bug reports — one Markdown file per finding —
+    plus a combined index. Returns the directory containing them."""
+    out = Path(output_dir)
+    bug_dir = out / f"testio-{_stamp(report)}"
+    bug_dir.mkdir(parents=True, exist_ok=True)
+    ordered = sorted(
+        report.findings,
+        key=lambda f: (SEVERITY_ORDER.index(f.severity), f.detected_at),
+    )
+    index = [
+        f"# Test IO bug reports — {report.target}",
+        "",
+        f"{len(ordered)} bug report(s), ready to paste into the Test IO form.",
+        "",
+    ]
+    for i, f in enumerate(ordered, 1):
+        slug = f.title.lower().replace(" ", "-")
+        slug = "".join(c for c in slug if c.isalnum() or c == "-")[:60] or f"bug-{i}"
+        path = bug_dir / f"{i:02d}-{f.severity.value}-{slug}.md"
+        path.write_text(render_testio_bug(report, f), encoding="utf-8")
+        sev = _TESTIO_SEVERITY.get(f.severity.value, "Low")
+        index.append(f"{i}. [{sev}] **{f.title}** — `{path.name}`")
+    (bug_dir / "00-INDEX.md").write_text("\n".join(index), encoding="utf-8")
+    return bug_dir
+
+
 def save_summary(
     report: Report,
     output_dir: str | Path,
