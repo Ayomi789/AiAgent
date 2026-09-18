@@ -162,7 +162,7 @@ def test_redaction_masks_jwt_and_bearer():
 
 
 def test_dashboard_api_requires_token(tmp_path):
-    """The dashboard's API must 401 without the token and 200 with it."""
+    """The dashboard gates everything: token for APIs, login page for humans."""
     from qaagent.dashboard import create_app
 
     app = create_app(
@@ -170,9 +170,10 @@ def test_dashboard_api_requires_token(tmp_path):
     )
     client = app.test_client()
 
-    # No token anywhere -> 401 on API, 401 on the page.
+    # No token anywhere -> 401 on API, redirect to /login on the page.
     assert client.get("/api/state").status_code == 401
-    assert client.get("/").status_code == 401
+    assert client.get("/").status_code == 302
+    assert "/login" in client.get("/").headers.get("Location", "")
     # Wrong token -> 401.
     assert client.get("/api/state?token=wrong").status_code == 401
     # Header token -> 200.
@@ -185,6 +186,95 @@ def test_dashboard_api_requires_token(tmp_path):
     assert resp.status_code == 200
     assert "sentinel_token" in resp.headers.get("Set-Cookie", "")
     assert client.get("/api/state").status_code == 200  # cookie carried it
+
+
+def test_dashboard_account_flow(tmp_path):
+    """Signup (first user = admin), login, logout, and CSRF enforcement."""
+    from qaagent.dashboard import create_app
+
+    app = create_app(tmp_path / "live.json", tmp_path, auth_token="tok")
+    app.config["WTF_CSRF_ENABLED"] = False  # not flask-wtf; placeholder no-op
+    client = app.test_client()
+
+    # First-time visitor: redirected to login; login page links to signup.
+    page = client.get("/login")
+    assert page.status_code == 200 and "Sign in" in page.get_data(as_text=True)
+
+    # Fetch the signup form to get a CSRF token.
+    import re
+
+    signup_page = client.get("/signup").get_data(as_text=True)
+    csrf = re.search(r'name="csrf_token" value="([^"]+)"', signup_page).group(1)
+
+    # Signup the first user (becomes admin), then land on the dashboard.
+    resp = client.post(
+        "/signup",
+        data={"email": "owner@example.com", "password": "supersecret9", "csrf_token": csrf},
+        follow_redirects=True,
+    )
+    body = resp.get_data(as_text=True)
+    assert "Run scan" in body and "owner@example.com" in body
+
+    # Logout (CSRF-protected POST), then the dashboard redirects to login again.
+    logout_page = client.get("/").get_data(as_text=True)
+    csrf2 = re.search(r'name="csrf_token" value="([^"]+)"', logout_page).group(1)
+    client.post("/logout", data={"csrf_token": csrf2})
+    assert client.get("/api/state").status_code == 401
+
+    # Login again with the same credentials.
+    login_html = client.get("/login").get_data(as_text=True)
+    csrf3 = re.search(r'name="csrf_token" value="([^"]+)"', login_html).group(1)
+    resp = client.post(
+        "/login",
+        data={"email": "owner@example.com", "password": "supersecret9", "csrf_token": csrf3},
+        follow_redirects=True,
+    )
+    assert "Run scan" in resp.get_data(as_text=True)
+
+    # Wrong password is rejected (and counts toward rate limiting).
+    client2 = app.test_client()
+    html = client2.get("/login").get_data(as_text=True)
+    csrf4 = re.search(r'name="csrf_token" value="([^"]+)"', html).group(1)
+    bad = client2.post(
+        "/login",
+        data={"email": "owner@example.com", "password": "wrong-pass-1", "csrf_token": csrf4},
+    )
+    assert "Wrong email or password" in bad.get_data(as_text=True)
+
+
+def test_dashboard_signup_requires_csrf(tmp_path):
+    """Posting the signup form without a CSRF token must fail."""
+    from qaagent.dashboard import create_app
+
+    app = create_app(tmp_path / "live.json", tmp_path, auth_token="tok")
+    client = app.test_client()
+    resp = client.post(
+        "/signup",
+        data={"email": "x@example.com", "password": "supersecret9"},
+    )
+    assert resp.status_code == 400
+
+
+def test_dashboard_login_rate_limited(tmp_path):
+    """Six bad logins from one IP -> the 6th is throttled."""
+    import re
+
+    from qaagent.dashboard import create_app
+
+    app = create_app(tmp_path / "live.json", tmp_path, auth_token="tok")
+    client = app.test_client()
+
+    def attempt(pwd: str):
+        html = client.get("/login").get_data(as_text=True)
+        csrf = re.search(r'name="csrf_token" value="([^"]+)"', html).group(1)
+        return client.post(
+            "/login",
+            data={"email": "nobody@example.com", "password": pwd, "csrf_token": csrf},
+        ).get_data(as_text=True)
+
+    for _ in range(5):
+        assert "Too many attempts" not in attempt("bad-pass-99")
+    assert "Too many attempts" in attempt("bad-pass-99")  # 6th blocked
 
 
 def test_dashboard_token_persists(tmp_path):

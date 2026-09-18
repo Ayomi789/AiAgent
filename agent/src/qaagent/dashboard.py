@@ -14,8 +14,17 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, redirect, request, session, url_for
 
+from qaagent.auth import (
+    RateLimiter,
+    UserStore,
+    csrf_token,
+    csrf_valid,
+    current_user,
+    login_user,
+    logout_user,
+)
 from qaagent.report.diff import compare_reports, load_report_files
 
 # Single-flight scan state: one agent run at a time, started from the UI.
@@ -29,6 +38,66 @@ _scan = {
 }
 
 _COOKIE = "sentinel_token"
+
+_LOGIN_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentinel - Sign in</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: "Segoe UI", system-ui, sans-serif; background: #07080b; color: #e8edf4;
+         min-height: 100vh; display: grid; place-items: center; padding: 20px; }}
+  .card {{ width: 100%; max-width: 380px; background: #10131a; border: 1px solid rgba(232,237,244,0.1);
+          border-radius: 14px; padding: 28px; box-shadow: 0 24px 60px -28px rgba(0,0,0,0.72); }}
+  .brand {{ display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }}
+  .mark {{ width: 34px; height: 34px; border-radius: 9px; background: #0e1218;
+          border: 1px solid rgba(46,230,166,0.28); display: grid; place-items: center; }}
+  h1 {{ font-size: 17px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 650; }}
+  .sub {{ color: #8b93a7; font-size: 12.5px; margin: 10px 0 20px; line-height: 1.5; }}
+  label {{ display: block; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+          color: #5a6276; font-weight: 600; margin: 12px 0 6px; }}
+  input[type=email], input[type=password] {{ width: 100%; height: 38px; background: #161b24;
+          border: 1px solid rgba(232,237,244,0.12); border-radius: 8px; color: #e8edf4;
+          padding: 0 12px; font-size: 14px; }}
+  input:focus {{ outline: 1px solid rgba(46,230,166,0.4); border-color: rgba(46,230,166,0.35); }}
+  button {{ width: 100%; height: 40px; margin-top: 18px; border-radius: 8px; cursor: pointer;
+           border: 1px solid rgba(46,230,166,0.35); color: #2ee6a6; font-weight: 700;
+           background: linear-gradient(180deg, rgba(46,230,166,0.16), rgba(46,230,166,0.08));
+           font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+           font-family: inherit; }}
+  button:hover {{ background: rgba(46,230,166,0.22); }}
+  .alt {{ text-align: center; margin-top: 16px; font-size: 12.5px; color: #8b93a7; }}
+  .alt a {{ color: #2ee6a6; text-decoration: none; }}
+  .flash {{ background: rgba(255,59,92,0.1); border: 1px solid rgba(255,59,92,0.35); color: #ff3b5c;
+           border-radius: 8px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 6px; }}
+  .tokenline {{ margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(232,237,244,0.08);
+               font-size: 12px; color: #8b93a7; text-align: center; }}
+  .tokenline a {{ color: #4d9fff; text-decoration: none; }}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">
+      <div class="mark"><svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.2" stroke="#2ee6a6" stroke-opacity="0.35"/><circle cx="10" cy="10" r="4.2" stroke="#2ee6a6" stroke-opacity="0.55"/><path d="M10 4.6V10l4.2 2.3" stroke="#2ee6a6" stroke-width="1.4" stroke-linecap="round"/><circle cx="10" cy="10" r="1.3" fill="#2ee6a6"/></svg></div>
+      <h1>Sentinel</h1>
+    </div>
+    <p class="sub">{subtitle}</p>
+    {flash}
+    <form method="post" action="{action}">
+      <input type="hidden" name="csrf_token" value="{csrf}">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" required autocomplete="email" autofocus>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" required minlength="8" autocomplete="{autocomplete}">
+      <button type="submit">{button_label}</button>
+    </form>
+    <div class="alt">{alt}</div>
+    <div class="tokenline">Running locally? <a href="/token-login">Continue with access token →</a></div>
+  </div>
+</body>
+</html>"""
 
 
 def load_or_create_token(reports_dir: Path) -> str:
@@ -53,7 +122,7 @@ _PAGE = """
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sentinel — Live QA</title>
+  <title>Sentinel - Live QA</title>
   <link rel='icon' type='image/svg+xml' href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.2" stroke="%232ee6a6" stroke-opacity="0.35"/><circle cx="10" cy="10" r="4.2" stroke="%232ee6a6" stroke-opacity="0.55"/><path d="M10 4.6V10l4.2 2.3" stroke="%232ee6a6" stroke-width="1.4" stroke-linecap="round"/><circle cx="10" cy="10" r="1.3" fill="%232ee6a6"/></svg>' />
   <style>
     :root {
@@ -909,6 +978,20 @@ _PAGE = """
 
     .foot span { font-family: var(--mono); }
 
+    .user-chip {{
+      display: inline-flex; align-items: center; gap: 8px;
+      height: 28px; padding: 0 6px 0 10px; border-radius: 999px;
+      border: 1px solid var(--line-2); background: var(--surface);
+    }}
+    .user-chip .u {{ font-size: 11px; color: var(--muted); font-family: var(--mono); }}
+    .user-chip button {{
+      appearance: none; border: 1px solid var(--line-2); background: transparent;
+      color: var(--muted); font-family: var(--mono); font-size: 9px;
+      letter-spacing: 0.1em; text-transform: uppercase; padding: 3px 8px;
+      border-radius: 999px; cursor: pointer;
+    }}
+    .user-chip button:hover {{ color: var(--crit); border-color: rgba(255,59,92,0.35); }}
+
     @keyframes scan {
       0% { top: -140px; }
       100% { top: 110%; }
@@ -994,6 +1077,7 @@ _PAGE = """
       <div class="top-right">
         <div class="live-pill" id="live-pill"><span class="dot"></span><span id="live-label">Standby</span></div>
         <div id="status" data-state="idle">Idle</div>
+        {user_chip}
       </div>
     </header>
 
@@ -1001,7 +1085,7 @@ _PAGE = """
 
     <section class="runbar" id="runbar">
       <div class="runfield">
-        <span class="k">Target — pick a config or type a new site</span>
+        <span class="k">Target - pick a config or type a new site</span>
         <input id="run-config" list="config-list" placeholder="example.com or config name" spellcheck="false" autocomplete="off" />
         <datalist id="config-list"></datalist>
       </div>
@@ -1017,7 +1101,7 @@ _PAGE = """
     <section class="command">
       <div class="tile" id="meta">
         <div class="meta-row">
-          <div class="meta-cell"><span class="k">Target</span><span class="v">—</span></div>
+          <div class="meta-cell"><span class="k">Target</span><span class="v">-</span></div>
           <div class="meta-cell"><span class="k">Elapsed</span><div class="num">00:00</div></div>
           <div class="meta-cell"><span class="k">Step</span><div class="num">0<span>/25</span></div></div>
         </div>
@@ -1051,7 +1135,7 @@ _PAGE = """
       <section class="panel diff-panel">
         <div class="panel-head">
           <h2>Diff vs previous</h2>
-          <span class="chip" id="diff-count">—</span>
+          <span class="chip" id="diff-count">-</span>
         </div>
         <div id="diff"></div>
       </section>
@@ -1284,7 +1368,7 @@ _PAGE = """
       }
 
       function renderMeta(state) {
-        var target = state.target || "—";
+        var target = state.target || "-";
         var elapsed = formatElapsed(state.elapsed_seconds);
         var step = Number(state.step) || 0;
         var max = Number(state.max_steps) || MAX_STEPS;
@@ -1442,7 +1526,7 @@ _PAGE = """
 
       function renderDiff(diff) {
         if (!diff) {
-          els.diffCount.textContent = "—";
+          els.diffCount.textContent = "-";
           els.diff.innerHTML = emptyState("Waiting on baseline", "Diff appears once this run can be compared to the previous sealed report.");
           return;
         }
@@ -1580,14 +1664,26 @@ def create_app(
     reports_dir: Path,
     project_root: Path | None = None,
     auth_token: str | None = None,
+    users_db: Path | None = None,
+    secret_key: str | None = None,
 ) -> Flask:
     app = Flask(__name__)
     root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
     token = auth_token or load_or_create_token(reports_dir)
+    app.secret_key = secret_key or secrets.token_hex(32)
+    users = UserStore(users_db or (Path(reports_dir) / "users.db"))
+    limiter = RateLimiter(max_attempts=5, window_seconds=300)
+
+    def _user():
+        return current_user(users)
+
+    def _client_ip() -> str:
+        return request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
 
     @app.before_request
-    def _require_token():
-        """Every request must carry the token (header, query, or cookie)."""
+    def _gate():
+        # Auth gate: session user OR bootstrap token (admin/API).
+        # Token auth (header / query / cookie) - also the API mechanism.
         provided = (
             request.headers.get("X-Sentinel-Token")
             or request.args.get("token")
@@ -1595,30 +1691,147 @@ def create_app(
         )
         if provided and secrets.compare_digest(provided, token):
             return None
+        # Logged-in human?
+        if _user() is not None:
+            return None
+        # Auth routes are the exception - that's how you get in.
+        if request.path in ("/login", "/signup", "/token-login"):
+            return None
         if request.path.startswith("/api/"):
             return jsonify({"error": "unauthorized"}), 401
-        return (
-            "<!DOCTYPE html><html><head><title>Sentinel — unauthorized</title></head>"
-            "<body style='font-family:sans-serif;background:#0b0d12;color:#e8edf4;"
-            "display:grid;place-items:center;min-height:100vh;text-align:center'>"
-            "<div><h2>Unauthorized</h2><p>Open the dashboard link printed by"
-            "<code style='color:#2ee6a6'> sentinel dashboard</code> — it includes the access token.</p></div>"
-            "</body></html>",
-            401,
-        )
+        return redirect(url_for("login", next=request.path))
 
     @app.after_request
     def _remember_token(resp):
-        """First visit via the tokened URL: hand the browser a cookie so the
-        UI's later fetches (and plain reloads) authenticate seamlessly."""
+        """Visits via the tokened URL hand the browser a cookie so later
+        UI fetches (and plain reloads) authenticate seamlessly."""
         provided = request.args.get("token")
         if provided and secrets.compare_digest(provided, token):
             resp.set_cookie(_COOKIE, token, httponly=True, samesite="Strict")
         return resp
 
+    @app.context_processor
+    def _inject_user():
+        return {"user": _user()}
+
+    # --- Auth routes ---------------------------------------------------------
+
+    def _auth_page(mode: str, subtitle: str, flash: str = ""):
+        if mode == "signup":
+            action, button = "/signup", "Create account"
+            alt = 'Already registered? <a href="/login">Sign in</a>'
+        else:
+            action, button = "/login", "Sign in"
+            alt = 'No account yet? <a href="/signup">Create one</a>'
+        return _LOGIN_PAGE.format(
+            subtitle=subtitle,
+            flash=f'<div class="flash">{flash}</div>' if flash else "",
+            action=action,
+            csrf=csrf_token(),
+            autocomplete="new-password" if mode == "signup" else "current-password",
+            button_label=button,
+            alt=alt,
+        )
+
+    @app.get("/login")
+    def login():
+        if _user() is not None:
+            return redirect("/")
+        return _auth_page("login", "Sign in to run scans and view reports.")
+
+    @app.post("/login")
+    def login_post():
+        ip = _client_ip()
+        if not limiter.check(f"login:{ip}"):
+            return _auth_page(
+                "login", "Sign in to run scans and view reports.",
+                "Too many attempts - wait 5 minutes and try again.",
+            )
+        email = request.form.get("email", "")
+        password = request.form.get("password", "")
+        if not csrf_valid(request.form):
+            return _auth_page("login", "Sign in to run scans and view reports.", "Invalid or expired form - try again."), 400
+        row = users.verify(email, password)
+        if row is None:
+            limiter.hit(f"login:{ip}")
+            return _auth_page("login", "Sign in to run scans and view reports.", "Wrong email or password.")
+        limiter.reset(f"login:{ip}")
+        login_user(int(row["id"]))
+        dest = request.args.get("next") or "/"
+        if not dest.startswith("/"):  # open-redirect guard
+            dest = "/"
+        return redirect(dest)
+
+    @app.get("/signup")
+    def signup():
+        if _user() is not None:
+            return redirect("/")
+        first = users.count() == 0
+        subtitle = (
+            "Create the admin account - the first user owns this Sentinel."
+            if first
+            else "Create an account to run scans and view reports."
+        )
+        return _auth_page("signup", subtitle)
+
+    @app.post("/signup")
+    def signup_post():
+        ip = _client_ip()
+        if not limiter.check(f"signup:{ip}"):
+            return _auth_page(
+                "signup", "Create an account to run scans and view reports.",
+                "Too many attempts - wait 5 minutes and try again.",
+            )
+        if not csrf_valid(request.form):
+            return _auth_page("signup", "Create an account to run scans and view reports.", "Invalid or expired form - try again."), 400
+        email = request.form.get("email", "").strip()
+        password = request.form.get("password", "")
+        first = users.count() == 0
+        try:
+            uid = users.create_user(email, password, role="admin" if first else "user")
+        except ValueError as exc:
+            return _auth_page("signup", "Create an account to run scans and view reports.", str(exc))
+        if uid is None:
+            return _auth_page("signup", "Create an account to run scans and view reports.", "That email is already registered - sign in instead.")
+        limiter.reset(f"signup:{ip}")
+        login_user(uid)
+        return redirect("/")
+
+    @app.get("/token-login")
+    def token_login_page():
+        """Local users arrive via the tokened URL - explain and honor it."""
+        provided = request.args.get("token", "")
+        if provided and secrets.compare_digest(provided, token):
+            resp = redirect("/")
+            resp.set_cookie(_COOKIE, provided, httponly=True, samesite="Strict")
+            return resp
+        return _auth_page(
+            "login",
+            "Sign in to run scans and view reports.",
+            "Access token missing or wrong - use the full URL printed by `sentinel dashboard`.",
+        )
+
+    @app.post("/logout")
+    def logout():
+        if not csrf_valid(request.form):
+            return redirect("/")
+        logout_user()
+        return redirect("/login")
+
     @app.get("/")
     def index() -> str:
-        return _PAGE
+        u = _user()
+        if u is not None:
+            chip = (
+                '<div class="user-chip"><span class="u">'
+                + (u["email"] or "")
+                + '</span><form method="post" action="/logout" style="display:inline">'
+                + '<input type="hidden" name="csrf_token" value="' + csrf_token() + '">'
+                + '<button type="submit">Log out</button></form></div>'
+            )
+        else:
+            chip = ""
+        return _PAGE.replace("{user_chip}", chip)
 
     @app.get("/api/configs")
     def api_configs():
@@ -1641,12 +1854,10 @@ def create_app(
 
     @app.post("/api/scan")
     def api_scan():
-        """Start a scan as a background process: {config, skip_llm}.
-
-        `config` may be an existing config name or a bare domain —
-        unknown domains get a config auto-created, matching the CLI's
-        `sentinel run --config somesite.com` behavior.
-        """
+        # Start a scan as a background process: {config, skip_llm}.
+        # `config` may be an existing config name or a bare domain;
+        # unknown domains get a config auto-created, matching the
+        # `sentinel run --config somesite.com` CLI behavior.
         body = request.get_json(silent=True) or {}
         name = str(body.get("config", "")).strip().rstrip("/")
         skip_llm = bool(body.get("skip_llm"))
@@ -1672,7 +1883,7 @@ def create_app(
             if target is None:
                 return jsonify(
                     {
-                        "error": f"no config for '{name}' and it is not a domain — "
+                        "error": f"no config for '{name}' and it is not a domain - "
                         "type a site like example.com, or create a config first"
                     }
                 ), 400
@@ -1807,9 +2018,18 @@ def run_dashboard(
     auth_token: str | None = None,
 ) -> None:
     """Serve the dashboard until interrupted."""
+    # Persistent session-signing key: logins survive dashboard restarts.
+    key_path = Path(reports_dir) / ".dashboard-secret"
+    if key_path.exists():
+        secret = key_path.read_text(encoding="utf-8").strip()
+    else:
+        secret = secrets.token_hex(32)
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key_path.write_text(secret, encoding="utf-8")
     create_app(
         state_path,
         reports_dir,
         project_root=project_root,
         auth_token=auth_token,
+        secret_key=secret,
     ).run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
