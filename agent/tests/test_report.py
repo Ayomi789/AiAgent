@@ -105,6 +105,100 @@ def test_save_report_testio_writes_per_finding_files():
         assert "high" in per_finding.name  # severity in the filename
 
 
+def test_redaction_masks_session_cookie_in_saved_reports():
+    """Evidence with a real session cookie must never reach a saved report."""
+    import tempfile
+    from pathlib import Path
+
+    from qaagent.models import Evidence, Finding, FindingCategory, Report, Severity
+    from qaagent.report.generator import (
+        save_report,
+        save_report_csv,
+        save_report_html,
+        save_report_json,
+        save_report_testio,
+    )
+
+    cookie = "session=.eJyrVirKz0lVslIqLU4tUtIBU_GZKUpWhhB2XmIuSDYxJzM5VakW.aoO9_Q.Ckjrr6Nk46A1jUjmgwWfPIP0g1E; Path=/"
+    finding = Finding(
+        title="Cookie flags",
+        severity=Severity.MEDIUM,
+        category=FindingCategory.SECURITY,
+        description="Cookie set without HttpOnly.",
+        evidence=[Evidence(kind="http_response", detail=cookie)],
+    )
+    report = Report(target="http://x.test", findings=[finding])
+    report.summary = report.build_summary()
+    with tempfile.TemporaryDirectory() as tmp:
+        save_report(report, tmp)
+        save_report_json(report, tmp)
+        save_report_html(report, tmp)
+        save_report_csv(report, tmp)
+        save_report_testio(report, tmp)
+        for artifact in sorted(Path(tmp).rglob("*")):
+            if artifact.is_file():
+                content = artifact.read_text(encoding="utf-8")
+                assert "eJyrVirKz0lVslIqLU4tUtIBU" not in content, f"leak in {artifact.name}"
+                # CSV rows and the Test IO index carry no evidence, so only
+                # the leak-check applies; other artifacts must show the marker.
+                if artifact.suffix != ".csv" and artifact.name != "00-INDEX.md":
+                    # HTML escapes the marker, so accept either form.
+                    assert (
+                        "<redacted>" in content
+                        or "&lt;redacted&gt;" in content
+                        or "<jwt-redacted>" in content
+                        or "&lt;jwt-redacted&gt;" in content
+                    ), f"no redaction marker in {artifact.name}"
+
+
+def test_redaction_masks_jwt_and_bearer():
+    from qaagent.report.generator import redact
+
+    jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9Pj-_sq5FgWMw"
+    out = redact(f"Authorization: Bearer abc123def456789 {jwt}")
+    assert "abc123def456789" not in out
+    assert "eyJhbGciOiJIUzI1NiIs" not in out
+    assert "Bearer<redacted>" in out or "Bearer <redacted>" in out or "<jwt-redacted>" in out
+
+
+def test_dashboard_api_requires_token(tmp_path):
+    """The dashboard's API must 401 without the token and 200 with it."""
+    from qaagent.dashboard import create_app
+
+    app = create_app(
+        tmp_path / "live.json", tmp_path, auth_token="test-token-123"
+    )
+    client = app.test_client()
+
+    # No token anywhere -> 401 on API, 401 on the page.
+    assert client.get("/api/state").status_code == 401
+    assert client.get("/").status_code == 401
+    # Wrong token -> 401.
+    assert client.get("/api/state?token=wrong").status_code == 401
+    # Header token -> 200.
+    assert (
+        client.get("/api/state", headers={"X-Sentinel-Token": "test-token-123"}).status_code
+        == 200
+    )
+    # Query token -> 200, and sets the cookie for later plain requests.
+    resp = client.get("/?token=test-token-123")
+    assert resp.status_code == 200
+    assert "sentinel_token" in resp.headers.get("Set-Cookie", "")
+    assert client.get("/api/state").status_code == 200  # cookie carried it
+
+
+def test_dashboard_token_persists(tmp_path):
+    """Restarting the dashboard must reuse the same token."""
+    from qaagent.dashboard import create_app, load_or_create_token
+
+    t1 = load_or_create_token(tmp_path)
+    t2 = load_or_create_token(tmp_path)
+    assert t1 == t2 and len(t1) >= 24
+    app = create_app(tmp_path / "live.json", tmp_path)  # no explicit token
+    client = app.test_client()
+    assert client.get("/api/state?token=" + t1).status_code == 200
+
+
 def test_render_html_ranks_by_severity():
     html = render_html(_report())
     assert html.index("CRITICAL") < html.index("LOW")

@@ -209,13 +209,19 @@ def dashboard(
     ),
 ) -> None:
     """Serve the live dashboard (http://127.0.0.1:<port>)."""
-    from qaagent.dashboard import run_dashboard
+    from qaagent.dashboard import load_or_create_token, run_dashboard
 
+    project_root = Path(__file__).resolve().parents[2]
+    reports.mkdir(parents=True, exist_ok=True)
+    token = load_or_create_token(reports)
+    url = f"http://127.0.0.1:{port}/?token={token}"
     console.print(
-        f"[green]Dashboard:[/green] [cyan]http://127.0.0.1:{port}[/cyan] "
-        "(Ctrl+C to stop)"
+        f"[green]Dashboard:[/green] [cyan]{url}[/cyan]\n"
+        f"[dim]The URL includes the access token (also saved in "
+        f"{reports / '.dashboard-token'}). Open it in a browser; the token "
+        "is remembered via cookie. Ctrl+C to stop.[/dim]"
     )
-    run_dashboard(state, reports, port)
+    run_dashboard(state, reports, port, project_root=project_root, auth_token=token)
 
 
 @app.command()

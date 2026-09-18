@@ -7,11 +7,45 @@ state file the agent writes during a run and the latest report Markdown.
 from __future__ import annotations
 
 import json
+import os
+import secrets
+import subprocess
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
 from qaagent.report.diff import compare_reports, load_report_files
+
+# Single-flight scan state: one agent run at a time, started from the UI.
+_scan = {
+    "proc": None,
+    "config": None,
+    "skip_llm": False,
+    "started": None,
+    "log_path": None,
+    "returncode": None,
+}
+
+_COOKIE = "sentinel_token"
+
+
+def load_or_create_token(reports_dir: Path) -> str:
+    """Load the dashboard auth token, creating one on first start.
+
+    Stored inside the (gitignored) reports dir so restarts keep the same
+    token and the secret never lands in git.
+    """
+    token_path = Path(reports_dir) / ".dashboard-token"
+    if token_path.exists():
+        token = token_path.read_text(encoding="utf-8").strip()
+        if token:
+            return token
+    token = secrets.token_urlsafe(24)
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(token, encoding="utf-8")
+    return token
 
 _PAGE = """
 <!DOCTYPE html>
@@ -252,6 +286,90 @@ _PAGE = """
       overflow: hidden;
       margin-bottom: 14px;
     }
+
+    .runbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%), var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 10px 14px;
+      margin-bottom: 14px;
+    }
+
+    .runfield { display: flex; flex-direction: column; gap: 5px; min-width: 240px; flex: 0 1 340px; }
+
+    #run-config {
+      height: 32px;
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid var(--line-2);
+      border-radius: 8px;
+      padding: 0 10px;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    #run-config::placeholder { color: var(--faint); }
+    #run-config:focus { outline: 1px solid rgba(46,230,166,0.4); border-color: rgba(46,230,166,0.35); }
+
+    .runtoggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; margin-top: 14px; }
+    .runtoggle input { display: none; }
+    .runtoggle .tg {
+      width: 30px; height: 17px; border-radius: 99px;
+      background: var(--surface-3); border: 1px solid var(--line-2);
+      position: relative; transition: background .2s, border-color .2s;
+    }
+    .runtoggle .tg::after {
+      content: ""; position: absolute; top: 2px; left: 2px;
+      width: 11px; height: 11px; border-radius: 50%;
+      background: var(--muted); transition: transform .2s, background .2s;
+    }
+    .runtoggle input:checked + .tg { background: rgba(46,230,166,0.18); border-color: rgba(46,230,166,0.4); }
+    .runtoggle input:checked + .tg::after { transform: translateX(13px); background: var(--mint); }
+    .runtoggle .tlabel { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.06em; }
+
+    #run-btn {
+      appearance: none;
+      height: 34px;
+      margin-top: 14px;
+      padding: 0 18px;
+      border-radius: 8px;
+      border: 1px solid rgba(46,230,166,0.35);
+      background: linear-gradient(180deg, rgba(46,230,166,0.16), rgba(46,230,166,0.08));
+      color: var(--mint);
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background .15s, border-color .15s, color .15s, opacity .15s;
+    }
+
+    #run-btn:hover:not(:disabled) { background: rgba(46,230,166,0.22); border-color: rgba(46,230,166,0.55); }
+    #run-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    #run-btn.running {
+      border-color: rgba(255,59,92,0.4);
+      background: rgba(255,59,92,0.1);
+      color: var(--crit);
+    }
+
+    .runstate {
+      flex: 1;
+      min-width: 200px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      text-align: right;
+      word-break: break-all;
+      margin-top: 16px;
+    }
+    .runstate.ok { color: var(--mint); }
+    .runstate.err { color: var(--crit); }
 
     #progress-fill {
       height: 100%;
@@ -819,6 +937,8 @@ _PAGE = """
     .pop { animation: tickpop .35s ease; }
 
     @media (max-width: 980px) {
+      .runbar { gap: 10px; }
+      .runstate { text-align: left; width: 100%; margin-top: 0; }
       .command { grid-template-columns: 1fr; }
       .grid {
         grid-template-columns: 1fr;
@@ -878,6 +998,21 @@ _PAGE = """
     </header>
 
     <div class="progress-wrap" id="progress-track"><div id="progress-fill"></div></div>
+
+    <section class="runbar" id="runbar">
+      <div class="runfield">
+        <span class="k">Target — pick a config or type a new site</span>
+        <input id="run-config" list="config-list" placeholder="example.com or config name" spellcheck="false" autocomplete="off" />
+        <datalist id="config-list"></datalist>
+      </div>
+      <label class="runtoggle" title="Deterministic probes only - no LLM calls, no browser. Fast and quota-free.">
+        <input type="checkbox" id="run-skipllm" />
+        <span class="tg"></span>
+        <span class="tlabel">skip LLM</span>
+      </label>
+      <button id="run-btn" type="button">Run scan</button>
+      <div class="runstate" id="run-state"></div>
+    </section>
 
     <section class="command">
       <div class="tile" id="meta">
@@ -981,6 +1116,94 @@ _PAGE = """
         source: $("source-label"),
         filters: $("finding-filters")
       };
+
+      var scanPolling = false;
+      var scanRunning = false;
+
+      function setRunState(msg, cls) {
+        var el = document.getElementById("run-state");
+        if (!el) return;
+        el.textContent = msg || "";
+        el.className = "runstate" + (cls ? " " + cls : "");
+      }
+
+      function setRunBtn() {
+        var btn = document.getElementById("run-btn");
+        if (!btn) return;
+        if (scanRunning) {
+          btn.textContent = "Scan running…";
+          btn.disabled = true;
+          btn.classList.add("running");
+        } else {
+          btn.textContent = "Run scan";
+          btn.disabled = false;
+          btn.classList.remove("running");
+        }
+      }
+
+      async function loadConfigs() {
+        try {
+          var res = await fetch("/api/configs", { cache: "no-store" });
+          if (!res.ok) return;
+          var data = await res.json();
+          var dl = document.getElementById("config-list");
+          if (!dl || !data.configs || !data.configs.length) return;
+          dl.innerHTML = data.configs.map(function (c) {
+            return '<option value="' + esc(c.name) + '">' + esc(c.target || "") + "</option>";
+          }).join("");
+        } catch (e) { /* controls stay empty; CLI still works */ }
+      }
+
+      function pollScanStatus() {
+        if (scanPolling) return;
+        scanPolling = true;
+        fetch("/api/scan/status", { cache: "no-store" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (s) {
+            scanPolling = false;
+            if (!s) return;
+            var wasRunning = scanRunning;
+            scanRunning = !!s.running;
+            if (scanRunning) {
+              var lines = s.log_tail || [];
+              var last = lines.length ? lines[lines.length - 1] : "starting…";
+              setRunState((s.config || "") + (s.skip_llm ? " (skip-llm)" : "") + " · " + last);
+            } else if (wasRunning && s.returncode != null) {
+              var ok = s.returncode === 0;
+              setRunState("scan finished · exit " + s.returncode, ok ? "ok" : "err");
+            }
+            if (wasRunning !== scanRunning) setRunBtn();
+          })
+          .catch(function () { scanPolling = false; });
+      }
+
+      async function startScan() {
+        var sel = document.getElementById("run-config");
+        var skip = document.getElementById("run-skipllm");
+        var cfg = sel ? sel.value : "";
+        if (!cfg) { setRunState("no config selected", "err"); return; }
+        try {
+          var res = await fetch("/api/scan", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ config: cfg, skip_llm: !!(skip && skip.checked) }),
+          });
+          var data = await res.json();
+          if (!res.ok) {
+            setRunState(data.error || "failed to start", "err");
+            return;
+          }
+          scanRunning = true;
+          setRunBtn();
+          var note = data.created ? "config created · " : "";
+          setRunState(
+            note + (data.config || cfg) + (data.skip_llm ? " (skip-llm)" : "") + " · starting…"
+          );
+          pollScanStatus();
+        } catch (e) {
+          setRunState("failed to reach dashboard API", "err");
+        }
+      }
 
       var filterSev = "all";
       var seenFindings = {};
@@ -1334,6 +1557,14 @@ _PAGE = """
         }
       }
 
+      var runBtn = document.getElementById("run-btn");
+      if (runBtn) runBtn.addEventListener("click", startScan);
+
+      loadConfigs();
+      setInterval(loadConfigs, 15000);
+      pollScanStatus();
+      setInterval(pollScanStatus, 2000);
+
       poll();
       setInterval(poll, POLL_MS);
     })();
@@ -1344,12 +1575,163 @@ _PAGE = """
 """
 
 
-def create_app(state_path: Path, reports_dir: Path) -> Flask:
+def create_app(
+    state_path: Path,
+    reports_dir: Path,
+    project_root: Path | None = None,
+    auth_token: str | None = None,
+) -> Flask:
     app = Flask(__name__)
+    root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
+    token = auth_token or load_or_create_token(reports_dir)
+
+    @app.before_request
+    def _require_token():
+        """Every request must carry the token (header, query, or cookie)."""
+        provided = (
+            request.headers.get("X-Sentinel-Token")
+            or request.args.get("token")
+            or request.cookies.get(_COOKIE)
+        )
+        if provided and secrets.compare_digest(provided, token):
+            return None
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "unauthorized"}), 401
+        return (
+            "<!DOCTYPE html><html><head><title>Sentinel — unauthorized</title></head>"
+            "<body style='font-family:sans-serif;background:#0b0d12;color:#e8edf4;"
+            "display:grid;place-items:center;min-height:100vh;text-align:center'>"
+            "<div><h2>Unauthorized</h2><p>Open the dashboard link printed by"
+            "<code style='color:#2ee6a6'> sentinel dashboard</code> — it includes the access token.</p></div>"
+            "</body></html>",
+            401,
+        )
+
+    @app.after_request
+    def _remember_token(resp):
+        """First visit via the tokened URL: hand the browser a cookie so the
+        UI's later fetches (and plain reloads) authenticate seamlessly."""
+        provided = request.args.get("token")
+        if provided and secrets.compare_digest(provided, token):
+            resp.set_cookie(_COOKIE, token, httponly=True, samesite="Strict")
+        return resp
 
     @app.get("/")
     def index() -> str:
         return _PAGE
+
+    @app.get("/api/configs")
+    def api_configs():
+        """List available scan configs (name + target) for the run controls."""
+        import yaml
+
+        configs = []
+        for path in sorted(root.glob("config*.yml")):
+            name = path.stem
+            if name.startswith("config."):
+                name = name[len("config.") :]
+            target = None
+            try:
+                data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                target = data.get("target")
+            except Exception:
+                target = None
+            configs.append({"name": name, "target": target, "file": path.name})
+        return jsonify({"configs": configs})
+
+    @app.post("/api/scan")
+    def api_scan():
+        """Start a scan as a background process: {config, skip_llm}.
+
+        `config` may be an existing config name or a bare domain —
+        unknown domains get a config auto-created, matching the CLI's
+        `sentinel run --config somesite.com` behavior.
+        """
+        body = request.get_json(silent=True) or {}
+        name = str(body.get("config", "")).strip().rstrip("/")
+        skip_llm = bool(body.get("skip_llm"))
+        if not name or len(name) > 200 or any(c in name for c in '\\/:*?"<>|'):
+            return jsonify({"error": "invalid config name"}), 400
+
+        # Resolve/auto-create the config exactly like the CLI does.
+        from qaagent.cli import _auto_create_config, _derive_target
+
+        created = False
+        probe = Path(name)
+        exists = any(
+            (root / cand).exists()
+            for cand in (
+                probe,
+                Path(f"config.{name}.yml"),
+                Path(f"{name}.yml"),
+                Path(f"config.{name}"),
+            )
+        )
+        if not exists:
+            target = _derive_target(name)
+            if target is None:
+                return jsonify(
+                    {
+                        "error": f"no config for '{name}' and it is not a domain — "
+                        "type a site like example.com, or create a config first"
+                    }
+                ), 400
+            _auto_create_config(name, target)
+            created = True
+
+        proc = _scan["proc"]
+        if proc is not None and proc.poll() is None:
+            return jsonify({"error": "a scan is already running"}), 409
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        log_path = reports_dir / "scan-ui.log"
+        args = [sys.executable, "-m", "qaagent", "run", "--config", name]
+        if skip_llm:
+            args.append("--skip-llm")
+        log_fh = open(log_path, "w", encoding="utf-8")
+        try:
+            proc = subprocess.Popen(
+                args,
+                cwd=str(root),
+                stdout=log_fh,
+                stderr=subprocess.STDOUT,
+                env=os.environ.copy(),
+            )
+        finally:
+            log_fh.close()
+        _scan.update(
+            proc=proc,
+            config=name,
+            skip_llm=skip_llm,
+            started=datetime.now(timezone.utc).isoformat(),
+            log_path=str(log_path),
+            returncode=None,
+        )
+        return jsonify(
+            {"started": True, "config": name, "skip_llm": skip_llm, "created": created}
+        )
+
+    @app.get("/api/scan/status")
+    def api_scan_status():
+        """Is a UI-started scan running, and what has it printed so far?"""
+        proc = _scan["proc"]
+        running = proc is not None and proc.poll() is None
+        if proc is not None and not running and _scan["returncode"] is None:
+            _scan["returncode"] = proc.returncode
+        tail: list[str] = []
+        if _scan["log_path"]:
+            log = Path(_scan["log_path"])
+            if log.exists():
+                tail = log.read_text(encoding="utf-8", errors="replace").splitlines()[-25:]
+        return jsonify(
+            {
+                "running": running,
+                "config": _scan["config"],
+                "skip_llm": _scan["skip_llm"],
+                "started": _scan["started"],
+                "returncode": _scan["returncode"],
+                "log_tail": tail,
+            }
+        )
 
     @app.get("/api/state")
     def api_state():
@@ -1417,8 +1799,17 @@ def create_app(state_path: Path, reports_dir: Path) -> Flask:
     return app
 
 
-def run_dashboard(state_path: Path, reports_dir: Path, port: int) -> None:
+def run_dashboard(
+    state_path: Path,
+    reports_dir: Path,
+    port: int,
+    project_root: Path | None = None,
+    auth_token: str | None = None,
+) -> None:
     """Serve the dashboard until interrupted."""
-    create_app(state_path, reports_dir).run(
-        host="127.0.0.1", port=port, debug=False, use_reloader=False
-    )
+    create_app(
+        state_path,
+        reports_dir,
+        project_root=project_root,
+        auth_token=auth_token,
+    ).run(host="127.0.0.1", port=port, debug=False, use_reloader=False)

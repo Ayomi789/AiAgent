@@ -4,9 +4,56 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from pathlib import Path
 
-from qaagent.models import MachineSummary, Report, SEVERITY_ORDER
+from qaagent.models import Evidence, Finding, MachineSummary, Report, SEVERITY_ORDER
+
+# --- Secret redaction -------------------------------------------------------
+#
+# Evidence often captures cookies, auth headers, and tokens verbatim (that is
+# the point of evidence) — but reports get shared: pasted into Test IO, attached
+# to tickets, committed by accident. Redact credential material at render time
+# so no output artifact carries a live secret.
+
+_SECRET_PATTERNS = [
+    # Flask/Django/JWT session cookies: "session=<long value>" — keep the name.
+    (re.compile(r"(?i)\b(session|sess|sid|auth|token|jwt|csrftoken|remember)[-_=:\s]+([A-Za-z0-9._%+~-]{8,})"), r"\1=<redacted>"),
+    # JWTs: header.payload.signature
+    (re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), "<jwt-redacted>"),
+    # Bearer / API key schemes.
+    (re.compile(r"(?i)\b(bearer|basic|nvapi|sk-)[\s-]*[A-Za-z0-9._-]{10,}"), r"\1<redacted>"),
+    # Generic long hex/base64 blobs (64+ chars) — likely keys/hashes.
+    (re.compile(r"\b[A-Fa-f0-9]{64,}\b"), "<hex-redacted>"),
+]
+
+
+def redact(text: str) -> str:
+    """Mask credential-looking material in free text (evidence, descriptions)."""
+    if not text:
+        return text
+    for pattern, replacement in _SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _redact_finding(finding: Finding) -> Finding:
+    """Copy a finding with credential material stripped from evidence/description."""
+    data = finding.model_dump()
+    data["description"] = redact(data.get("description") or "")
+    if data.get("remediation"):
+        data["remediation"] = redact(data["remediation"])
+    for ev in data.get("evidence", []):
+        if ev.get("detail"):
+            ev["detail"] = redact(ev["detail"])
+    return Finding.model_validate(data)
+
+
+def _redacted_report(report: Report) -> Report:
+    """Return a copy of the report safe to render into any output artifact."""
+    return report.model_copy(
+        update={"findings": [_redact_finding(f) for f in report.findings]}
+    )
 
 
 def _stamp(report: Report) -> str:
@@ -67,7 +114,7 @@ def save_report(report: Report, output_dir: str | Path) -> Path:
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"report-{_stamp(report)}.md"
-    path.write_text(render_markdown(report), encoding="utf-8")
+    path.write_text(render_markdown(_redacted_report(report)), encoding="utf-8")
     return path
 
 
@@ -76,7 +123,7 @@ def save_report_json(report: Report, output_dir: str | Path) -> Path:
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"report-{_stamp(report)}.json"
-    path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    path.write_text(_redacted_report(report).model_dump_json(indent=2), encoding="utf-8")
     return path
 
 
@@ -190,7 +237,7 @@ def save_report_html(report: Report, output_dir: str | Path) -> Path:
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"report-{_stamp(report)}.html"
-    path.write_text(render_html(report), encoding="utf-8")
+    path.write_text(render_html(_redacted_report(report)), encoding="utf-8")
     return path
 
 
@@ -206,7 +253,7 @@ def save_report_csv(report: Report, output_dir: str | Path) -> Path:
         "content_type", "description", "remediation", "detected_at",
     ])
     ordered = sorted(
-        report.findings,
+        _redacted_report(report).findings,
         key=lambda f: (SEVERITY_ORDER.index(f.severity), f.detected_at),
     )
     for f in ordered:
@@ -322,7 +369,7 @@ def save_report_testio(report: Report, output_dir: str | Path) -> Path:
     bug_dir = out / f"testio-{_stamp(report)}"
     bug_dir.mkdir(parents=True, exist_ok=True)
     ordered = sorted(
-        report.findings,
+        _redacted_report(report).findings,
         key=lambda f: (SEVERITY_ORDER.index(f.severity), f.detected_at),
     )
     index = [
@@ -352,7 +399,9 @@ def save_summary(
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     summary = MachineSummary.from_report(
-        report, report_markdown=str(markdown_path), report_json=str(json_path)
+        _redacted_report(report),
+        report_markdown=str(markdown_path),
+        report_json=str(json_path),
     )
     path = out / "latest.json"
     path.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
