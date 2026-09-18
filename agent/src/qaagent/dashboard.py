@@ -35,6 +35,8 @@ _scan = {
     "started": None,
     "log_path": None,
     "returncode": None,
+    "owner_id": None,
+    "owner_email": None,
 }
 
 _COOKIE = "sentinel_token"
@@ -72,6 +74,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
   .alt a {{ color: #2ee6a6; text-decoration: none; }}
   .flash {{ background: rgba(255,59,92,0.1); border: 1px solid rgba(255,59,92,0.35); color: #ff3b5c;
            border-radius: 8px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 6px; }}
+  .flash-ok {{ background: rgba(46,230,166,0.08); border: 1px solid rgba(46,230,166,0.35); color: #2ee6a6; }}
   .tokenline {{ margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(232,237,244,0.08);
                font-size: 12px; color: #8b93a7; text-align: center; }}
   .tokenline a {{ color: #4d9fff; text-decoration: none; }}
@@ -94,7 +97,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
       <button type="submit">{button_label}</button>
     </form>
     <div class="alt">{alt}</div>
-    <div class="tokenline">Running locally? <a href="/token-login">Continue with access token →</a></div>
+    <div class="tokenline">Running locally? <a href="/token-login?token={token}">Continue with access token →</a></div>
   </div>
 </body>
 </html>"""
@@ -979,18 +982,61 @@ _PAGE = """
     .foot span { font-family: var(--mono); }
 
     .user-chip {{
-      display: inline-flex; align-items: center; gap: 8px;
-      height: 28px; padding: 0 6px 0 10px; border-radius: 999px;
-      border: 1px solid var(--line-2); background: var(--surface);
+      display: inline-flex; align-items: center; gap: 9px;
+      height: 34px; padding: 0 6px 0 7px; border-radius: 999px;
+      border: 1px solid var(--line-2);
+      background: linear-gradient(180deg, var(--surface-2), var(--surface));
+      box-shadow: inset 0 1px 0 rgba(232, 237, 244, 0.04);
+      transition: border-color .18s ease, box-shadow .18s ease;
     }}
-    .user-chip .u {{ font-size: 11px; color: var(--muted); font-family: var(--mono); }}
+    .user-chip:hover {{
+      border-color: rgba(46, 230, 166, 0.28);
+      box-shadow: inset 0 1px 0 rgba(232, 237, 244, 0.04), 0 0 0 3px rgba(46, 230, 166, 0.05);
+    }}
+    .user-chip .avatar {{
+      width: 22px; height: 22px; border-radius: 50%; flex: none;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: 10px; font-weight: 700;
+      color: var(--mint); text-transform: uppercase;
+      background: radial-gradient(circle at 30% 30%, rgba(46,230,166,0.28), rgba(46,230,166,0.07));
+      border: 1px solid rgba(46, 230, 166, 0.35);
+    }}
+    .user-chip .u {{
+      font-size: 11px; color: var(--text); font-family: var(--mono);
+      max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }}
+    .user-chip .role {{
+      flex: none; font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase;
+      font-family: var(--mono); color: var(--mint);
+      border: 1px solid rgba(46, 230, 166, 0.35); background: rgba(46, 230, 166, 0.08);
+      padding: 2.5px 8px; border-radius: 999px;
+    }}
+    .user-chip form {{ display: inline-flex; margin: 0; }}
     .user-chip button {{
-      appearance: none; border: 1px solid var(--line-2); background: transparent;
-      color: var(--muted); font-family: var(--mono); font-size: 9px;
-      letter-spacing: 0.1em; text-transform: uppercase; padding: 3px 8px;
-      border-radius: 999px; cursor: pointer;
+      appearance: none; display: inline-flex; align-items: center; gap: 6px;
+      height: 22px; padding: 0 11px; border-radius: 999px; cursor: pointer;
+      border: 1px solid var(--line-2); background: transparent;
+      color: var(--muted); font-family: var(--mono); font-size: 9.5px;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      transition: color .16s ease, border-color .16s ease, background .16s ease,
+                  box-shadow .16s ease, transform .1s ease;
     }}
-    .user-chip button:hover {{ color: var(--crit); border-color: rgba(255,59,92,0.35); }}
+    .user-chip button svg {{ opacity: 0.75; flex: none; transition: opacity .16s ease; }}
+    .user-chip button:hover {{
+      color: #ff5c76; border-color: rgba(255, 59, 92, 0.45);
+      background: rgba(255, 59, 92, 0.09);
+      box-shadow: 0 0 0 3px rgba(255, 59, 92, 0.07);
+    }}
+    .user-chip button:hover svg {{ opacity: 1; }}
+    .user-chip button:active {{ transform: translateY(1px) scale(0.98); }}
+    .user-chip button:focus-visible {{
+      outline: 2px solid rgba(255, 59, 92, 0.5); outline-offset: 2px;
+    }}
+
+    @media (max-width: 640px) {{
+      .user-chip {{ height: 30px; gap: 7px; }}
+      .user-chip .u, .user-chip .role {{ display: none; }}
+    }}
 
     @keyframes scan {
       0% { top: -140px; }
@@ -1680,6 +1726,23 @@ def create_app(
     def _client_ip() -> str:
         return request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
 
+    def _viewer_is_admin() -> bool:
+        """Admins and bootstrap-token callers see every report; users see their own."""
+        u = _user()
+        if u is None:
+            return True  # token-authenticated (the gate already rejected anonymous)
+        return u["role"] == "admin"
+
+    def _owns_report(rep: dict) -> bool:
+        """True if the current viewer may see this report."""
+        if _viewer_is_admin():
+            return True
+        u = _user()
+        return u is not None and rep.get("owner_id") == u["id"]
+
+    def _own_reports(reports: list[dict]) -> list[dict]:
+        return [r for r in reports if _owns_report(r)]
+
     @app.before_request
     def _gate():
         # Auth gate: session user OR bootstrap token (admin/API).
@@ -1697,6 +1760,9 @@ def create_app(
         # Auth routes are the exception - that's how you get in.
         if request.path in ("/login", "/signup", "/token-login"):
             return None
+        # Static assets and favicon don't need auth.
+        if request.path == "/favicon.ico" or request.path.startswith("/static/"):
+            return None
         if request.path.startswith("/api/"):
             return jsonify({"error": "unauthorized"}), 401
         return redirect(url_for("login", next=request.path))
@@ -1707,7 +1773,7 @@ def create_app(
         UI fetches (and plain reloads) authenticate seamlessly."""
         provided = request.args.get("token")
         if provided and secrets.compare_digest(provided, token):
-            resp.set_cookie(_COOKIE, token, httponly=True, samesite="Strict")
+            resp.set_cookie(_COOKIE, token, httponly=True, samesite="Lax")
         return resp
 
     @app.context_processor
@@ -1716,27 +1782,34 @@ def create_app(
 
     # --- Auth routes ---------------------------------------------------------
 
-    def _auth_page(mode: str, subtitle: str, flash: str = ""):
+    def _auth_page(mode: str, subtitle: str, flash: str = "", flash_ok: bool = False):
         if mode == "signup":
             action, button = "/signup", "Create account"
             alt = 'Already registered? <a href="/login">Sign in</a>'
         else:
             action, button = "/login", "Sign in"
             alt = 'No account yet? <a href="/signup">Create one</a>'
+        flash_cls = "flash flash-ok" if flash_ok and flash else "flash"
         return _LOGIN_PAGE.format(
             subtitle=subtitle,
-            flash=f'<div class="flash">{flash}</div>' if flash else "",
+            flash=f'<div class="{flash_cls}">{flash}</div>' if flash else "",
             action=action,
             csrf=csrf_token(),
             autocomplete="new-password" if mode == "signup" else "current-password",
             button_label=button,
             alt=alt,
+            token=token,
         )
 
     @app.get("/login")
     def login():
         if _user() is not None:
             return redirect("/")
+        if request.args.get("out") == "1":
+            return _auth_page(
+                "login", "Sign in to run scans and view reports.",
+                "You are signed out. See you next scan.", flash_ok=True,
+            )
         return _auth_page("login", "Sign in to run scans and view reports.")
 
     @app.post("/login")
@@ -1803,7 +1876,7 @@ def create_app(
         provided = request.args.get("token", "")
         if provided and secrets.compare_digest(provided, token):
             resp = redirect("/")
-            resp.set_cookie(_COOKIE, provided, httponly=True, samesite="Strict")
+            resp.set_cookie(_COOKIE, provided, httponly=True, samesite="Lax")
             return resp
         return _auth_page(
             "login",
@@ -1816,18 +1889,39 @@ def create_app(
         if not csrf_valid(request.form):
             return redirect("/")
         logout_user()
-        return redirect("/login")
+        return redirect("/login?out=1")
 
     @app.get("/")
     def index() -> str:
         u = _user()
         if u is not None:
+            import html as _html
+
+            email = u["email"] or ""
+            initial = (email[:1] or "?").upper()
+            role_badge = (
+                '<span class="role" title="This account manages this Sentinel instance">'
+                "admin</span>"
+                if u["role"] == "admin"
+                else ""
+            )
             chip = (
-                '<div class="user-chip"><span class="u">'
-                + (u["email"] or "")
-                + '</span><form method="post" action="/logout" style="display:inline">'
+                '<div class="user-chip" title="Signed in as '
+                + _html.escape(email, quote=True)
+                + '">'
+                + '<span class="avatar" aria-hidden="true">' + _html.escape(initial) + '</span>'
+                + '<span class="u">' + _html.escape(email) + '</span>'
+                + role_badge
+                + '<form method="post" action="/logout">'
                 + '<input type="hidden" name="csrf_token" value="' + csrf_token() + '">'
-                + '<button type="submit">Log out</button></form></div>'
+                + '<button type="submit" aria-label="Log out of Sentinel">'
+                + '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true">'
+                + '<path d="M15 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8" '
+                + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+                + '<path d="M16 17l5-5-5-5M21 12H9" '
+                + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+                + '</svg>'
+                + 'Log out</button></form></div>'
             )
         else:
             chip = ""
@@ -1898,6 +1992,16 @@ def create_app(
         args = [sys.executable, "-m", "qaagent", "run", "--config", name]
         if skip_llm:
             args.append("--skip-llm")
+        # Ownership: the scan belongs to whoever clicked Run. The subprocess
+        # reads SENTINEL_OWNER_* and stamps every report it writes with it.
+        u = _user()
+        env = os.environ.copy()
+        if u is not None:
+            env["SENTINEL_OWNER_ID"] = str(u["id"])
+            env["SENTINEL_OWNER_EMAIL"] = u["email"] or ""
+        else:
+            env.pop("SENTINEL_OWNER_ID", None)
+            env.pop("SENTINEL_OWNER_EMAIL", None)
         log_fh = open(log_path, "w", encoding="utf-8")
         try:
             proc = subprocess.Popen(
@@ -1905,7 +2009,7 @@ def create_app(
                 cwd=str(root),
                 stdout=log_fh,
                 stderr=subprocess.STDOUT,
-                env=os.environ.copy(),
+                env=env,
             )
         finally:
             log_fh.close()
@@ -1916,6 +2020,8 @@ def create_app(
             started=datetime.now(timezone.utc).isoformat(),
             log_path=str(log_path),
             returncode=None,
+            owner_id=(u["id"] if u is not None else None),
+            owner_email=(u["email"] if u is not None else None),
         )
         return jsonify(
             {"started": True, "config": name, "skip_llm": skip_llm, "created": created}
@@ -1958,12 +2064,28 @@ def create_app(
                 "step": 0,
                 "max_steps": 0,
             }
+        # Isolation: the live view shows only the viewer's own scan. A running
+        # or just-finished scan tracks its starter in _scan; older scans with a
+        # different owner (or pre-ownership runs) show as idle for others.
+        if not _viewer_is_admin():
+            u = _user()
+            owner = _scan.get("owner_id")
+            if owner is None or (u is not None and owner != u["id"]):
+                data = {
+                    "status": "idle",
+                    "stage": "No run yet",
+                    "target": "",
+                    "findings": [],
+                    "recent_actions": [],
+                    "step": 0,
+                    "max_steps": 0,
+                }
         return jsonify(data)
 
     @app.get("/api/diff")
     def api_diff():
         """Compare the two most recent runs: new / fixed / unchanged findings."""
-        reports = load_report_files(reports_dir)
+        reports = _own_reports(load_report_files(reports_dir))
         if not reports:
             return jsonify(
                 {
@@ -1996,9 +2118,24 @@ def create_app(
             return jsonify(
                 {"path": None, "json_path": None, "markdown": "No report yet."}
             )
-        latest = files[-1]
-        json_files = sorted(reports_dir.glob("report-*.json"))
-        json_path = str(json_files[-1]) if json_files else None
+        # Walk newest-first until the first report the viewer owns.
+        latest = None
+        json_path = None
+        for f in reversed(files):
+            stamp = f.stem[len("report-") :]
+            jf = reports_dir / f"report-{stamp}.json"
+            try:
+                rep = json.loads(jf.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if _owns_report(rep):
+                latest = f
+                json_path = str(jf) if jf.exists() else None
+                break
+        if latest is None:
+            return jsonify(
+                {"path": None, "json_path": None, "markdown": "No report yet."}
+            )
         return jsonify(
             {
                 "path": str(latest),
