@@ -98,6 +98,22 @@ Or create it explicitly (then edit in credentials / sensitive files):
 sentinel init-config --name stylesbytiwa --target https://stylesbytiwa.netlify.app
 ```
 
+## Pre-flight check (doctor)
+
+Before trusting a scan — especially after a provider changes things — run:
+
+```bash
+sentinel doctor                                  # data paths + configs + live LLM probe
+sentinel doctor --config config.solnew.yml       # also checks that config's model + target
+sentinel doctor --skip-llm                       # offline-safe
+```
+
+It verifies the reports directory, parses every `config*.yml` (failing on
+retired models), confirms the configured LLM **actually answers and makes
+tool calls** (the failure mode that twice silently broke runs), and
+optionally probes the target's reachability. Exit code 1 on failure, so it
+fits in scripts and CI.
+
 ## Watch a run live (dashboard)
 
 Start the dashboard in one terminal, then run the agent in another:

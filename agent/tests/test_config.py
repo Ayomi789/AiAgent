@@ -162,29 +162,23 @@ def test_default_model_is_not_retired():
     Twice-burned: the llama-3.3-70b default outlived a model swap so every
     newly auto-created config scanned with a dead model ('LLM API error 410'),
     and z-ai/glm-5.3-flash stopped routing overnight ('LLM API error 404').
-    Any model confirmed dead goes on this list.
+    Any model confirmed dead goes on RETIRED_LLM_MODELS.
     """
-    retired_models = (
-        "llama-3.3-70b-instruct",
-        "z-ai/glm-5.3-flash",
-    )
-    from qaagent.config import DEFAULT_LLM_MODEL
+    from qaagent.config import DEFAULT_LLM_MODEL, RETIRED_LLM_MODELS
 
-    for retired in retired_models:
+    for retired in RETIRED_LLM_MODELS:
         assert retired not in DEFAULT_LLM_MODEL
 
 
 def test_no_config_ships_a_retired_model():
     """No shipped config may reference a retired model, even commented out."""
-    retired_models = (
-        "llama-3.3-70b-instruct",
-        "z-ai/glm-5.3-flash",
-    )
+    from qaagent.config import RETIRED_LLM_MODELS
+
     shipped = sorted(PROJECT_ROOT.glob("config*.yml"))
     assert shipped, "expected at least one shipped config"
     for path in shipped:
         text = path.read_text(encoding="utf-8")
-        for retired in retired_models:
+        for retired in RETIRED_LLM_MODELS:
             assert retired not in text, (
                 f"{path.name} still references retired model {retired!r}"
             )

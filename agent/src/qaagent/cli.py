@@ -247,6 +247,74 @@ def dashboard(
 
 
 @app.command()
+def doctor(
+    config: Path | None = typer.Option(
+        None, "--config", "-c", help="Also deep-check this config (its model + target)."
+    ),
+    target: str | None = typer.Option(
+        None, "--target", "-t", help="Also probe this URL for reachability."
+    ),
+    skip_llm: bool = typer.Option(
+        False, "--skip-llm", help="Skip the live LLM probe (offline-safe)."
+    ),
+) -> None:
+    """Verify data paths, config health, and the LLM before you trust a scan.
+
+    Catches the silent failures that ruin runs: retired LLM models, configs
+    that no longer parse, a missing API key, and unreachable targets.
+    Exit code is 1 when any check fails, so it works in scripts and CI.
+    """
+    import time
+
+    from qaagent import doctor
+
+    project_root = Path(__file__).resolve().parents[2]
+    reports_dir = project_root / "reports"
+    resolved: Path | None = None
+    if config is not None:
+        try:
+            resolved = _resolve_config(config)
+        except FileNotFoundError:
+            console.print(f"[red]Config not found:[/red] {config}")
+            raise typer.Exit(code=1) from None
+
+    console.print(
+        Panel.fit(
+            f"project:  {project_root}\n"
+            f"reports:  {reports_dir}"
+            + (f"\nconfig:   {resolved}" if resolved else ""),
+            title="Sentinel doctor",
+        )
+    )
+
+    _load_env()
+    started = time.time()
+    checks = doctor.run_checks(
+        project_root,
+        reports_dir,
+        config_path=resolved,
+        target=target,
+        probe_model=not skip_llm,
+    )
+
+    icon = {"ok": "[green]OK [/green]", "warn": "[yellow]WARN[/yellow]", "fail": "[red]FAIL[/red]"}
+    for c in checks:
+        console.print(f" {icon[c.status]} {c.name:<10} {c.detail}")
+
+    n_fail = doctor.failed(checks)
+    n_warn = sum(1 for c in checks if c.status == "warn")
+    elapsed = time.time() - started
+    if n_fail:
+        console.print(f"\n[red]{n_fail} check(s) failed[/red]" + (f", {n_warn} warning(s)" if n_warn else "") + f" in {elapsed:.1f}s")
+        raise typer.Exit(code=1)
+    console.print(
+        f"\n[green]All checks passed[/green]"
+        + (f" with {n_warn} warning(s)" if n_warn else "")
+        + f" in {elapsed:.1f}s - ready to scan."
+    )
+
+
+@app.command()
 def run(
     target: str | None = typer.Option(
         None, "--target", "-t", help="Target URL. Overrides the config file."

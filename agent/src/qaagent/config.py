@@ -12,6 +12,13 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 # any config or template that still references a retired model.
 DEFAULT_LLM_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 
+# Models confirmed dead on the provider (410 Gone / 404 Not Found). `sentinel
+# doctor` and the guard tests use this list to catch stale references.
+RETIRED_LLM_MODELS = (
+    "meta/llama-3.3-70b-instruct",
+    "z-ai/glm-5.3-flash",
+)
+
 
 class ScopeConfig(BaseModel):
     """Hard boundary on what the agent is allowed to touch."""
