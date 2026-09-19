@@ -707,9 +707,23 @@ _PAGE = r"""
       overflow: auto;
     }
 
-    #findings { max-height: 760px; }
-    #diff { max-height: 340px; }
-    #actions { max-height: 360px; }
+    /* The findings panel spans the whole right column (diff+actions+history).
+       The right lists are capped, so their panels fix the grid row heights;
+       the findings panel stretches to exactly those rows and its list flexes
+       to fill it - both columns bottom-align with no dead space. The
+       end-marker pins to the list bottom on short runs. */
+    .findings-panel #findings { flex: 1 1 auto; min-height: 360px; display: flex; flex-direction: column; }
+    #diff { flex: 1 1 auto; min-height: 0; max-height: 340px; }
+    #actions { flex: 1 1 auto; min-height: 0; max-height: 360px; }
+    #history { flex: 1 1 auto; min-height: 0; max-height: 420px; }
+    .findings-end {
+      margin-top: auto; padding: 16px 0 6px; text-align: center;
+      color: var(--faint); font-size: 9.5px; letter-spacing: 0.16em;
+      text-transform: uppercase; font-family: var(--mono);
+    }
+    .findings-end::before, .findings-end::after {
+      content: "\2014"; opacity: 0.5; margin: 0 8px;
+    }
 
     .group {
       margin-bottom: 8px;
@@ -1142,9 +1156,10 @@ _PAGE = r"""
           "findings"
           "diff"
           "actions"
+          "history"
           "report";
       }
-      #findings, #diff, #actions, #report { max-height: 420px; }
+      #findings, #diff, #actions, #history, #report { max-height: 420px; }
       .meta-row { grid-template-columns: 1fr; gap: 10px; }
     }
 
@@ -1633,6 +1648,9 @@ _PAGE = r"""
           });
           html += "</div>";
         });
+        // Pins to the panel bottom on short runs so the filled area reads as
+        // occupied instead of blank space beside the right column.
+        html += '<div class="findings-end">end of findings - ' + filtered.length + " shown</div>";
         var sig = filtered.map(function (f) { return (f.title || "") + (f.severity || ""); }).join("|") + "|" + filterSev;
         if (sig !== lastFindingSig) {
           els.findings.innerHTML = html;
