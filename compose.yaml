@@ -1,0 +1,48 @@
+# Sentinel production deployment (see agent/docs/DEPLOYMENT.md).
+#
+#   cp .env.example .env      # fill in NVIDIA_API_KEY + SENTINEL_DOMAIN
+#   docker compose up -d --build
+#
+# Caddy issues and renews the TLS certificate automatically.
+#
+# All persistent state lives in ./data on the host (reports/, users.db,
+# tokens, dashboard-created configs) - one directory to back up.
+
+services:
+  web:
+    build: .
+    image: sentinel-agent:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Only Caddy is a trusted proxy hop (ProxyFix reads X-Forwarded-*).
+      FORWARDED_ALLOW_IPS: caddy
+      SENTINEL_DATA_DIR: /data
+      SENTINEL_CONFIG_DIR: /data/configs
+    expose:
+      - "8000"
+    volumes:
+      - ./data:/data
+    # Scans spawn Chromium and run for minutes - generous stop grace.
+    stop_grace_period: 30s
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      SENTINEL_DOMAIN: ${SENTINEL_DOMAIN:?set SENTINEL_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  caddy_data: {}
+  caddy_config: {}

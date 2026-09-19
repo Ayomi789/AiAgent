@@ -457,6 +457,51 @@ def _signup(client, email: str) -> None:
     assert resp.status_code == 200
 
 
+def test_phase1_healthz_cookies_proxyfix(tmp_path):
+    """Production posture: public healthz, secure-aware cookies, ProxyFix on."""
+    from qaagent.dashboard import create_app
+
+    (tmp_path / "live.json").write_text(json.dumps({"status": "idle"}), encoding="utf-8")
+    app = create_app(tmp_path / "live.json", tmp_path, auth_token="tok")
+    client = app.test_client()
+
+    # /healthz is public and JSON-ok.
+    r = client.get("/healthz")
+    assert r.status_code == 200 and r.get_json() == {"ok": True}
+
+    # Everything else stays gated.
+    assert client.get("/").status_code == 302
+    assert client.get("/api/state").status_code == 401
+
+    # Session cookies carry the production posture.
+    cfg = app.config
+    assert cfg["SESSION_COOKIE_SECURE"] is True
+    assert cfg["SESSION_COOKIE_HTTPONLY"] is True
+    assert cfg["SESSION_COOKIE_SAMESITE"] == "Lax"
+    assert cfg["SESSION_COOKIE_NAME"] == "sentinel_session"
+
+    # Token cookie honors the scheme: Secure on https, not on http.
+    cookie_name = "sentinel_token"
+    https = app.test_client()
+    https.get("/healthz", base_url="https://localhost")
+    https.get("/?token=tok", base_url="https://localhost")
+    cookie = https.get_cookie(cookie_name)
+    assert cookie is not None and cookie.secure is True
+    http = app.test_client()
+    http.get("/?token=tok")  # default http base
+    cookie2 = http.get_cookie(cookie_name)
+    assert cookie2 is not None and cookie2.secure is False
+
+    # ProxyFix is installed (X-Forwarded-Proto drives request.scheme).
+    from werkzeug.middleware.proxy_fix import ProxyFix
+
+    assert isinstance(app.wsgi_app, ProxyFix)
+    behind = app.test_client()
+    behind.get("/?token=tok", headers={"X-Forwarded-Proto": "https"})
+    cookie3 = behind.get_cookie(cookie_name)
+    assert cookie3 is not None and cookie3.secure is True
+
+
 def test_reports_isolated_between_accounts(tmp_path):
     """Each account sees only its own scans; admins and tokens see everything."""
     from qaagent.dashboard import _scan, create_app

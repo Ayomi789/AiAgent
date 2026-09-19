@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import yaml
@@ -63,8 +64,12 @@ class RunConfig(BaseModel):
     max_steps: int = Field(default=25, ge=1, le=500)
     headless: bool = True
     browser_channel: str = Field(
-        default="msedge",
-        description="Playwright channel: 'msedge' uses the system Edge (no download); 'chromium' needs `playwright install`.",
+        default_factory=lambda: os.environ.get("BROWSER_CHANNEL", "msedge"),
+        description=(
+            "Playwright channel: 'msedge' uses the system Edge (no download); "
+            "'chromium' needs `playwright install`. Containers set "
+            "BROWSER_CHANNEL=chromium (no Edge there); Windows local keeps msedge."
+        ),
     )
     output_dir: Path = Path("reports")
     skip_llm: bool = Field(

@@ -1,0 +1,21 @@
+# Sentinel TLS termination. The domain comes from .env (SENTINEL_DOMAIN).
+# Caddy obtains and renews the certificate automatically.
+
+{$SENTINEL_DOMAIN} {
+	encode gzip
+
+	# Timeouts sized for scan-start (spawns Chromium) and report downloads.
+	reverse_proxy web:8000 {
+		transport http {
+			response_header_timeout 600s
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; include-subdomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}

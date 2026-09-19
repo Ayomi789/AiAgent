@@ -74,6 +74,19 @@ def _load_env() -> None:
     load_dotenv(override=False)
 
 
+def _config_dir() -> Path:
+    """Where site configs live: SENTINEL_CONFIG_DIR if set, else the project root.
+
+    Local installs keep configs in agent/ next to the code. Hosted deployments
+    set SENTINEL_CONFIG_DIR to a persistent volume path so dashboard-created
+    configs survive container rebuilds.
+    """
+    env_dir = os.environ.get("SENTINEL_CONFIG_DIR")
+    if env_dir:
+        return Path(env_dir)
+    return Path(__file__).resolve().parents[2]
+
+
 def _resolve_config(path: Path) -> Path:
     """Resolve a config path with shorthand aliases.
 
@@ -82,25 +95,25 @@ def _resolve_config(path: Path) -> Path:
       2. config.solnew.yml
       3. solnew.yml
       4. config.solnew
-    If none of those exist in the current directory, the project root
-    (agent/) is searched the same way, so `sentinel run --config solnew`
-    works from anywhere on the machine.
+    If none of those exist in the current directory, the config directory
+    (project root, or SENTINEL_CONFIG_DIR) is searched the same way, so
+    `sentinel run --config solnew` works from anywhere on the machine.
     Raises FileNotFoundError with a helpful message if none match.
     """
     candidates = [path, Path(f"config.{path}.yml"), Path(f"{path}.yml"), Path(f"config.{path}")]
     for candidate in candidates:
         if candidate.exists():
             return candidate
-    # Fall back to the project root (where the CLI ships), so the command
-    # works from any working directory once `sentinel` is on PATH.
-    project_root = Path(__file__).resolve().parents[2]
+    # Fall back to the config directory (where the CLI ships), so the
+    # command works from any working directory once `sentinel` is on PATH.
+    config_dir = _config_dir()
     for candidate in candidates:
-        rooted = project_root / candidate
+        rooted = config_dir / candidate
         if rooted.exists():
             return rooted
     tried = ", ".join(str(p) for p in candidates)
     raise FileNotFoundError(
-        f"Config file not found. Tried (cwd + {project_root}): {tried}"
+        f"Config file not found. Tried (cwd + {config_dir}): {tried}"
     )
 
 
@@ -127,6 +140,7 @@ _AUTO_CONFIG_TEMPLATE = """\
 # Add test credentials or extra sensitive_files here if you have them.
 
 target: {target}
+# (browser_channel omitted - BROWSER_CHANNEL env or the msedge default applies)
 
 scope:
   allowed_origins: []        # empty = auto-scope to the target's origin
@@ -144,7 +158,6 @@ llm:
 agent:
   max_steps: 25
   headless: true
-  browser_channel: msedge
   output_dir: reports
 """
 
@@ -165,8 +178,8 @@ def _anchor_output_dir(cfg: RunConfig, config_path: Path | None, project_root: P
 
 def _auto_create_config(name: str, target: str) -> Path:
     """Write a per-site config for a bare site name and return its path."""
-    project_root = Path(__file__).resolve().parents[2]
-    path = project_root / f"config.{name}.yml"
+    path = _config_dir() / f"config.{name}.yml"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         _AUTO_CONFIG_TEMPLATE.format(target=target), encoding="utf-8"
     )

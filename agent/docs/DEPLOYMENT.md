@@ -17,8 +17,11 @@ Ready for hosting — built in v1:
 - All state in one directory: `reports/` (reports, users.db, tokens, live state)
 
 Gaps to close before launch (each maps to a phase below):
-1. Flask **dev server** is serving the app (`dashboard.py` `.run(...)`) — not for production
-2. Cookies lack `Secure`; no `SESSION_COOKIE_SECURE`/proxy config
+1. ~~Flask **dev server** is serving the app~~ → **Phase 1 done:** `wsgi.py` +
+   WSGI entrypoint shipped; verified under waitress (cross-platform) and
+   designed for gunicorn in the Linux container
+2. ~~Cookies lack `Secure`~~ → **Phase 1 done:** `SESSION_COOKIE_*` set; token
+   cookie gains `Secure` automatically when the request is https (via ProxyFix)
 3. **Signup is open** — first visitor could claim admin on a fresh instance
 4. **No authorization-to-scan proof** — legally required for a public testing tool
 5. Playwright defaults to `msedge` channel — needs bundled Chromium in the container
@@ -43,79 +46,84 @@ Choices and why:
 - **Caddy** over nginx/certbot: TLS certificates issue and renew automatically
   with two lines of config. One less thing to break.
 - **gunicorn** over the Flask dev server: concurrency + sane timeouts. 2–4
-  workers is plenty for a single-box launch.
+  workers is plenty for a single-box launch. (gunicorn is Unix-only — correct
+  for the Linux container; on Windows dev machines, waitress serves the same
+  `wsgi:app` and was used to verify this entrypoint.)
 - **Single VPS + Docker Compose** over Kubernetes/serverless: scans are
   long-running (minutes) and spawn Playwright browsers — containers, not
   serverless. One box runs the web app and the scan workers; split later.
 - **Bind gunicorn to `127.0.0.1` inside the Docker network**; only Caddy
   publishes 443/80.
 
-## Phase 1 — Production server (small code changes)
+## Phase 1 — Production server ✅ DONE
 
-1. **WSGI entrypoint** (`wsgi.py` at repo root):
-   ```python
-   from qaagent.cli import _load_env
-   from qaagent.dashboard import load_or_create_token, run_dashboard_wsgi
-   _load_env()
-   # app factory wired to project-root reports/, token from env or disk
-   ```
-   Add `run_dashboard_wsgi(...)` next to `run_dashboard` that returns the app
-   instead of calling `.run()`. `sentinel dashboard` stays exactly as is for
-   local use.
-2. **Secure cookies behind the proxy** in `create_app`:
-   ```python
-   app.config.update(
-       SESSION_COOKIE_SECURE=True,      # never over plain HTTP
-       SESSION_COOKIE_HTTPONLY=True,
-       SESSION_COOKIE_SAMESITE="Lax",
-       SESSION_COOKIE_NAME="sentinel_session",
-   )
-   ```
-   For the token cookie: `samesite="Lax", secure=True` (keep `httponly`).
-   Add `PROXY_FIX`-style handling (or `ProxyFix` from werkzeug) so
-   `_client_ip()` and redirect URLs trust exactly one proxy hop.
-3. **Dependency**: `gunicorn` added to a new `[project.optional-dependencies]
-   prod = ["gunicorn>=21", "werkzeug>=3"]`.
-4. **Health endpoint**: `GET /healthz` → `{"ok": true}` without auth, for the
-   reverse proxy and uptime checks. (Note: `/_health` may collide with scan
-   probing; `healthz` is unambiguous.)
+Shipped:
+1. **WSGI entrypoint** — `wsgi.py` at the repo root. Env-driven config:
+   - `SENTINEL_DATA_DIR` — root for `reports/` state (default: repo layout)
+   - `SENTINEL_TOKEN` — bootstrap token (default: `reports/.dashboard-token`)
+   - `NVIDIA_API_KEY` — loaded from env or project `.env`
+   Local `sentinel dashboard` is unchanged; `run_dashboard` now wraps a shared
+   `build_app_for_serving` factory so both modes get the persisted session key.
+2. **Secure cookies behind the proxy** — `create_app` now sets
+   `SESSION_COOKIE_SECURE / HTTPONLY / SAMESITE=Lax` and renames the session
+   cookie to `sentinel_session`. `werkzeug.ProxyFix(x_for=1, x_proto=1,
+   x_host=1)` is installed so `_client_ip()` and redirect URLs trust exactly
+   one proxy hop. The dashboard token cookie is emitted with `secure=True`
+   whenever `request.scheme == "https"` — plain-HTTP local use unchanged.
+3. **`GET /healthz`** — public (auth-gate allowlisted), returns `{"ok": true}`;
+   for Caddy and uptime monitors. Everything else stays gated (tested).
+4. **Dependency** — `prod = ["gunicorn>=21"]` extra in `pyproject.toml`.
 
-## Phase 2 — Container image + Compose
+Verified: 90/90 tests (new `test_phase1_healthz_cookies_proxyfix` covers
+public healthz, still-gated everything else, cookie flags, ProxyFix scheme
+behavior); live dashboard serves `/healthz` → `{"ok": true}`, root → 302,
+tokened root → 200 with `Secure; HttpOnly; SameSite=Lax` cookie under a
+forwarded-https request; `wsgi:app` served end-to-end by waitress on :8000.
 
-1. `Dockerfile` (repo root):
-   - Base: `mcr.microsoft.com/playwright/python:v1.49.0-jammy` (bundles browser
-     deps — the hard part of containerizing Playwright)
-   - `pip install -e ".[prod,targets]"` + `playwright install chromium`
-   - Non-root user; `ENV BROWSER_CHANNEL=chromium` (config default stays msedge
-     for local Windows use)
-   - Copy `agent/` sources; volume-mount point `/data/reports`
-2. `compose.yaml`:
-   ```yaml
-   services:
-     web:
-       build: .
-       command: gunicorn -w 2 -t 600 -b 127.0.0.1:8000 wsgi:app
-       env_file: .env            # NVIDIA_API_KEY, SENTINEL_PUBLIC_URL
-       volumes: ["./data/reports:/data/reports"]
-       restart: unless-stopped
-     caddy:
-       image: caddy:2
-       ports: ["80:80", "443:443"]
-       volumes:
-         - ./Caddyfile:/etc/caddy/Caddyfile
-         - caddy_data:/data
-   volumes: { caddy_data: {} }
-   ```
-   `-t 600` because scan-start returns after spawning, but history/download
-   requests are quick; the timeout protects stuck workers.
-3. `Caddyfile` (whole file):
-   ```
-   sentinel.example.com {
-       reverse_proxy web:8000
-   }
-   ```
-4. `.env` on the server (never committed):
-   `NVIDIA_API_KEY=…`, `SENTINEL_PUBLIC_URL=https://sentinel.example.com`
+## Phase 2 — Container image + Compose ✅ built (needs a free disk to run)
+
+Files at the repo root:
+
+1. **`Dockerfile`** — `mcr.microsoft.com/playwright/python:v1.49.0-jammy`
+   (bundles browser + OS deps — the hard part of containerizing Playwright).
+   Copies `agent/pyproject.toml` + `agent/src` and root `wsgi.py`, installs
+   `".[prod,targets]"` and the Chromium build matching the base image, runs as
+   the image's non-root `pwuser`, sets `BROWSER_CHANNEL=chromium` and
+   `SENTINEL_DATA_DIR=/data` + `SENTINEL_CONFIG_DIR=/data/configs`, exposes
+   8000 with an image-level HEALTHCHECK on `/healthz`, and launches
+   `gunicorn --workers 2 --threads 4 --timeout 600` (threads so a long scan
+   doesn't block logins/report downloads; `-t 600` covers slow scan-starts).
+2. **`compose.yaml`** — `web` (built image; single bind mount `./data:/data` so
+   reports, users.db, tokens, and configs all persist in one host folder;
+   `FORWARDED_ALLOW_IPS: caddy` pins the trusted proxy hop for ProxyFix;
+   30s stop grace for running scans) + `caddy` (80/443 + HTTP/3, auto-TLS,
+   named volumes for cert store, waits for web's healthcheck). All persistent
+   state = one directory to back up: `./data`.
+3. **`Caddyfile`** — env-driven domain `{$SENTINEL_DOMAIN}`, `reverse_proxy
+   web:8000` with a 600s response-header timeout (scan-start spawns Chromium),
+   HSTS + nosniff + DENY-frame + Referrer-Policy headers, `-Server`.
+4. **`.env.example` → `.env`** (gitignored): `NVIDIA_API_KEY`,
+   `SENTINEL_DOMAIN` (must resolve via DNS before first boot), optional
+   `SENTINEL_TOKEN` (auto-generated into `data/reports/.dashboard-token`).
+5. **`.dockerignore`** — keeps `.env`, `data/`, local `agent/reports/`, and
+   site configs out of the image (configs are user state on the volume).
+
+Supporting code change (required for correctness, tested):
+`SENTINEL_CONFIG_DIR` — dashboard config listing, auto-create, and the run
+subprocess all resolve site configs through one shared resolver
+(`_config_dir()` in `qaagent/cli.py`). Locally it is the project root; in the
+container it is `/data/configs` on the volume, so dashboard-created configs
+survive rebuilds instead of being baked into the image layer.
+
+**Deploy:** `cp .env.example .env` → fill in → `docker compose up -d --build`.
+Caddy obtains and renews the certificate automatically.
+
+Verified so far: `docker compose config` valid (volume, env, healthcheck,
+port wiring all as above); 92/92 tests; `wsgi:app` proven under a real WSGI
+server in Phase 1. **The image build itself is blocked on this dev machine —
+the C: drive is 100% full** (the Playwright base image alone is ~2 GB
+downloaded / ~8 GB unpacked). Free space (Downloads alone is 10 GB) or build
+on any other machine/VPS — the compose stack is ready either way.
 
 ## Phase 3 — Launch safety (required for a public testing tool)
 
@@ -158,10 +166,10 @@ Choices and why:
 
 ## Build order (each shippable on its own)
 
-| # | Deliverable | Unblocks |
+| # | Deliverable | Status |
 |---|---|---|
-| 1 | `wsgi.py` + gunicorn + `healthz` + secure cookies + ProxyFix | Phase 1 done, deployable behind any TLS proxy |
-| 2 | Dockerfile + compose + Caddyfile | A real HTTPS URL |
-| 3 | Bootstrap-code signup + invite codes | Public without admin-claim risk |
-| 4 | Ownership declaration + private-range block + quotas | Legal to operate |
-| 5 | Docker-sandboxed scans + admin view + ToS | Production-grade |
+| 1 | `wsgi.py` + gunicorn + `healthz` + secure cookies + ProxyFix | ✅ done |
+| 2 | Dockerfile + compose + Caddyfile | next |
+| 3 | Bootstrap-code signup + invite codes | — |
+| 4 | Ownership declaration + private-range block + quotas | — |
+| 5 | Docker-sandboxed scans + admin view + ToS | — |

@@ -238,3 +238,50 @@ def test_derive_target_rejects_non_domains():
     assert _derive_target("config.yml") is None
     assert _derive_target("config.foo") is None
     assert _derive_target("my site") is None
+
+
+def test_config_dir_env_overrides_project_root(monkeypatch, tmp_path):
+    """SENTINEL_CONFIG_DIR must relocate both resolution and auto-create.
+
+    Hosted deployments set it to a persistent volume: dashboard-created
+    site configs have to survive container rebuilds instead of landing
+    inside the image next to the code.
+    """
+    import os
+
+    from qaagent.cli import _auto_create_config, _config_dir
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SENTINEL_CONFIG_DIR", raising=False)
+    assert _config_dir() == PROJECT_ROOT  # default: project root
+
+    volume = tmp_path / "volume" / "configs"
+    monkeypatch.setenv("SENTINEL_CONFIG_DIR", str(volume))
+    assert _config_dir() == volume
+
+    # Auto-create lands on the volume (creating it), not beside the code.
+    path = _auto_create_config("hosted.example", "https://hosted.example")
+    try:
+        assert path == volume / "config.hosted.example.yml"
+        assert path.exists()
+        assert os.environ["SENTINEL_CONFIG_DIR"] == str(volume)
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def test_config_resolution_uses_config_dir_when_cwd_empty(monkeypatch, tmp_path):
+    """The hosted path: cwd has no configs, the volume does."""
+    from qaagent.cli import _resolve_config
+
+    empty_cwd = tmp_path / "cwd"
+    empty_cwd.mkdir()
+    volume = tmp_path / "volume" / "configs"
+    volume.mkdir(parents=True)
+    (volume / "config.hosted.example.yml").write_text(
+        "target: https://hosted.example", encoding="utf-8"
+    )
+    monkeypatch.chdir(empty_cwd)
+    monkeypatch.setenv("SENTINEL_CONFIG_DIR", str(volume))
+
+    resolved = _resolve_config(Path("hosted.example"))
+    assert resolved == volume / "config.hosted.example.yml"

@@ -1,0 +1,25 @@
+# Keep secrets, state, and dev junk out of the image.
+.git
+.freebuff
+.env
+*.log
+
+# Local state - always volume-mounted, never baked in.
+agent/reports/
+data/
+
+# Site configs are user state (data/configs in production), not image content.
+agent/config*.yml
+agent/*.yml
+!agent/config.example.yml
+
+# Dev environments and caches.
+agent/.venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Local-only artifacts.
+desktop.png

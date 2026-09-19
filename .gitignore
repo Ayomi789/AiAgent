@@ -5,3 +5,9 @@
 .DS_Store
 Thumbs.db
 *.log
+
+# Secrets - never commit the real deployment env
+.env
+
+# Deployed runtime state (reports, users.db, tokens, site configs)
+data/

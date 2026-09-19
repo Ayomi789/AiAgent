@@ -1909,8 +1909,30 @@ def create_app(
     root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
     token = auth_token or load_or_create_token(reports_dir)
     app.secret_key = secret_key or secrets.token_hex(32)
+
+    # Production posture: behind a TLS-terminating reverse proxy (see
+    # docs/DEPLOYMENT.md). Cookies are Secure whenever the request arrived
+    # over https (via ProxyFix), so plain-HTTP local use keeps working.
+    from werkzeug.middleware.proxy_fix import ProxyFix
+
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_NAME="sentinel_session",
+        SESSION_COOKIE_SECURE=True,  # only honored when scheme is https
+    )
+
     users = UserStore(users_db or (Path(reports_dir) / "users.db"))
     limiter = RateLimiter(max_attempts=5, window_seconds=300)
+
+    def _cookie_kwargs() -> dict:
+        """Cookie flags for the dashboard token cookie, Secure on https."""
+        return {
+            "httponly": True,
+            "samesite": "Lax",
+            "secure": request.scheme == "https",
+        }
 
     def _user():
         return current_user(users)
@@ -1949,6 +1971,9 @@ def create_app(
         # Logged-in human?
         if _user() is not None:
             return None
+        # Health check is public (uptime monitors, the reverse proxy).
+        if request.path == "/healthz":
+            return None
         # Auth routes are the exception - that's how you get in.
         if request.path in ("/login", "/signup", "/token-login"):
             return None
@@ -1965,8 +1990,13 @@ def create_app(
         UI fetches (and plain reloads) authenticate seamlessly."""
         provided = request.args.get("token")
         if provided and secrets.compare_digest(provided, token):
-            resp.set_cookie(_COOKIE, token, httponly=True, samesite="Lax")
+            resp.set_cookie(_COOKIE, token, **_cookie_kwargs())
         return resp
+
+    @app.get("/healthz")
+    def healthz():
+        """Public liveness probe for the reverse proxy and uptime monitors."""
+        return jsonify({"ok": True})
 
     @app.context_processor
     def _inject_user():
@@ -2068,7 +2098,7 @@ def create_app(
         provided = request.args.get("token", "")
         if provided and secrets.compare_digest(provided, token):
             resp = redirect("/")
-            resp.set_cookie(_COOKIE, provided, httponly=True, samesite="Lax")
+            resp.set_cookie(_COOKIE, provided, **_cookie_kwargs())
             return resp
         return _auth_page(
             "login",
@@ -2124,8 +2154,10 @@ def create_app(
         """List available scan configs (name + target) for the run controls."""
         import yaml
 
+        from qaagent.cli import _config_dir
+
         configs = []
-        for path in sorted(root.glob("config*.yml")):
+        for path in sorted(_config_dir().glob("config*.yml")):
             name = path.stem
             if name.startswith("config."):
                 name = name[len("config.") :]
@@ -2150,13 +2182,15 @@ def create_app(
         if not name or len(name) > 200 or any(c in name for c in '\\/:*?"<>|'):
             return jsonify({"error": "invalid config name"}), 400
 
-        # Resolve/auto-create the config exactly like the CLI does.
-        from qaagent.cli import _auto_create_config, _derive_target
+        # Resolve/auto-create the config exactly like the CLI does -
+        # same directory the run subprocess will search (SENTINEL_CONFIG_DIR).
+        from qaagent.cli import _auto_create_config, _config_dir, _derive_target
 
         created = False
         probe = Path(name)
+        config_dir = _config_dir()
         exists = any(
-            (root / cand).exists()
+            (config_dir / cand).exists()
             for cand in (
                 probe,
                 Path(f"config.{name}.yml"),
@@ -2433,15 +2467,24 @@ def create_app(
     return app
 
 
-def run_dashboard(
+def build_app_for_serving(
     state_path: Path,
     reports_dir: Path,
-    port: int,
     project_root: Path | None = None,
     auth_token: str | None = None,
-) -> None:
-    """Serve the dashboard until interrupted."""
-    # Persistent session-signing key: logins survive dashboard restarts.
+) -> Flask:
+    """Create the dashboard app with the persisted session-signing key.
+
+    Used by both the local dev server (run_dashboard) and the production
+    WSGI entrypoint (wsgi.py), so logins survive restarts in both modes.
+    Also pins the shared config directory (SENTINEL_CONFIG_DIR or the project
+    root) so run/config listing/auto-create agree no matter the cwd — the
+    hosted case keeps dashboard-created configs on the persistent volume.
+    """
+    os.environ.setdefault(
+        "SENTINEL_CONFIG_DIR",
+        str(Path(project_root) if project_root else Path(__file__).resolve().parents[2]),
+    )
     key_path = Path(reports_dir) / ".dashboard-secret"
     if key_path.exists():
         secret = key_path.read_text(encoding="utf-8").strip()
@@ -2449,10 +2492,22 @@ def run_dashboard(
         secret = secrets.token_hex(32)
         key_path.parent.mkdir(parents=True, exist_ok=True)
         key_path.write_text(secret, encoding="utf-8")
-    create_app(
+    return create_app(
         state_path,
         reports_dir,
         project_root=project_root,
         auth_token=auth_token,
         secret_key=secret,
-    ).run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
+    )
+
+
+def run_dashboard(
+    state_path: Path,
+    reports_dir: Path,
+    port: int,
+    project_root: Path | None = None,
+    auth_token: str | None = None,
+) -> None:
+    """Serve the dashboard with the local dev server until interrupted."""
+    app = build_app_for_serving(state_path, reports_dir, project_root, auth_token)
+    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
