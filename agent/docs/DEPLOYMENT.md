@@ -125,9 +125,9 @@ the C: drive is 100% full** (the Playwright base image alone is ~2 GB
 downloaded / ~8 GB unpacked). Free space (Downloads alone is 10 GB) or build
 on any other machine/VPS — the compose stack is ready either way.
 
-## Phase 3 — Launch safety ✅ built (except items 3–5 below)
+## Phase 3 — Launch safety ✅ built (except item 3: sandboxing)
 
-Shipped (111/111 tests, live-verified):
+Shipped (120/120 tests, live-verified):
 
 1. **Closed signup** — `signup_policy()` in `qaagent/auth.py`:
    - fresh instance (0 users): signup requires the **dashboard bootstrap
@@ -161,9 +161,15 @@ Still open (by design, pre-launch):
 4. **Admin moderation:** an `/admin` view listing users, invites, and running
    scans; admin can suspend a user (immediately blocks new scans and hides
    their reports).
-5. **Legal pages:** Terms of Service (authorized testing only, you must own or
-   have permission) and a DMCA/abuse contact. This is what keeps the host and
-   registrar on your side.
+5. **Legal pages ✅** — public `/terms` (versioned ToS: authorized testing
+   only, no attacking, rate/scope limits, termination, no warranty) and
+   `/abuse` (contact channel from `SENTINEL_ABUSE_EMAIL` / `SENTINEL_ABUSE_URL`,
+   with an operator hint if unset). Signup requires an explicit consent
+   checkbox (server-enforced, recorded per user with IP); scanning is blocked
+   for logged-in users whose acceptance is missing or older than
+   `TERMS_VERSION` (403 `terms_required`), with one-click re-acceptance wired
+   into the run controls; the dashboard footer links both pages. Token
+   callers (operator/CI) are exempt.
 
 ## Phase 4 — Ops
 

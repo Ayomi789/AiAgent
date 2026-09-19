@@ -27,6 +27,8 @@ services:
       # Leave unset for invite-only signup; set to 1 on private/firewalled
       # deployments to let anyone register.
       SENTINEL_OPEN_SIGNUP: ""
+      # Published abuse channel (/abuse page) - set a real address before launch.
+      SENTINEL_ABUSE_EMAIL: ${SENTINEL_ABUSE_EMAIL:-abuse@${SENTINEL_DOMAIN}}
     expose:
       - "8000"
     volumes:

@@ -170,7 +170,7 @@ def test_first_signup_requires_bootstrap_token(tmp_path, monkeypatch):
     csrf = _csrf(client, "/signup")
     ok = client.post("/signup", data={
         "email": "owner@example.com", "password": "supersecret9",
-        "csrf_token": csrf, "bootstrap_token": "tok",
+        "csrf_token": csrf, "bootstrap_token": "tok", "accept_terms": "1",
     }, follow_redirects=True)
     assert "Run scan" in ok.get_data(as_text=True)
 
@@ -195,7 +195,7 @@ def test_later_signup_requires_invite_code(tmp_path, monkeypatch):
     csrf = _csrf(client, "/signup")
     bad = client.post("/signup", data={
         "email": "friend@example.com", "password": "supersecret9",
-        "csrf_token": csrf, "invite_code": "GARBAGE",
+        "csrf_token": csrf, "invite_code": "GARBAGE", "accept_terms": "1",
     })
     assert "not valid" in bad.get_data(as_text=True)
 
@@ -204,7 +204,7 @@ def test_later_signup_requires_invite_code(tmp_path, monkeypatch):
     csrf = _csrf(client, "/signup")
     ok = client.post("/signup", data={
         "email": "friend@example.com", "password": "supersecret9",
-        "csrf_token": csrf, "invite_code": code,
+        "csrf_token": csrf, "invite_code": code, "accept_terms": "1",
     }, follow_redirects=True)
     assert ok.status_code == 200
     assert users.count() == 2
@@ -214,7 +214,7 @@ def test_later_signup_requires_invite_code(tmp_path, monkeypatch):
     csrf = _csrf(other, "/signup")
     again = other.post("/signup", data={
         "email": "stranger@example.com", "password": "supersecret9",
-        "csrf_token": csrf, "invite_code": code,
+        "csrf_token": csrf, "invite_code": code, "accept_terms": "1",
     })
     assert "not valid" in again.get_data(as_text=True)
 

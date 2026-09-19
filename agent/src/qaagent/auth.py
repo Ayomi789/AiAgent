@@ -43,6 +43,13 @@ CREATE TABLE IF NOT EXISTS invites (
     used_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS terms_acceptances (
+    user_id INTEGER PRIMARY KEY,
+    version TEXT NOT NULL,
+    accepted_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ip TEXT
+);
 """
 
 
@@ -97,6 +104,28 @@ class UserStore:
                 "SELECT id, email, role, created_at FROM users WHERE id = ?",
                 (user_id,),
             ).fetchone()
+
+    # --- Terms acceptance (Phase 3: legal layer) -----------------------------
+
+    def accept_terms(self, user_id: int, version: str, ip: str = "") -> None:
+        """Record (or re-record) the user's acceptance of the given version."""
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT INTO terms_acceptances (user_id, version, accepted_at, ip) "
+                "VALUES (?, ?, datetime('now'), ?) "
+                "ON CONFLICT(user_id) DO UPDATE SET version = excluded.version, "
+                "accepted_at = excluded.accepted_at, ip = excluded.ip",
+                (user_id, version, ip),
+            )
+
+    def terms_accepted_version(self, user_id: int) -> str | None:
+        """The terms version this user last accepted, or None."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT version FROM terms_acceptances WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        return row["version"] if row else None
 
     def count(self) -> int:
         with self._lock, self._conn() as conn:

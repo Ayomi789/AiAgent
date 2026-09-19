@@ -215,6 +215,7 @@ def test_dashboard_account_flow(tmp_path):
             "password": "supersecret9",
             "csrf_token": csrf,
             "bootstrap_token": "tok",
+            "accept_terms": "1",
         },
         follow_redirects=True,
     )
@@ -455,7 +456,12 @@ def _signup(client, email: str, *, bootstrap_token: str | None = None, invite_co
 
     html = client.get("/signup").get_data(as_text=True)
     csrf = re.search(r'name="csrf_token" value="([^"]+)"', html).group(1)
-    data = {"email": email, "password": "supersecret9", "csrf_token": csrf}
+    data = {
+        "email": email,
+        "password": "supersecret9",
+        "csrf_token": csrf,
+        "accept_terms": "1",  # legal consent is part of every real signup
+    }
     if bootstrap_token is not None:
         data["bootstrap_token"] = bootstrap_token
     if invite_code is not None:

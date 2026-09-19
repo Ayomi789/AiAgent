@@ -78,6 +78,11 @@ _LOGIN_PAGE = """<!DOCTYPE html>
   .flash-ok {{ background: rgba(46,230,166,0.08); border: 1px solid rgba(46,230,166,0.35); color: #2ee6a6; }}
   .tokenline {{ margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(232,237,244,0.08);
                font-size: 12px; color: #8b93a7; text-align: center; }}
+  label.consent {{ display: flex; gap: 8px; align-items: flex-start; font-size: 12px;
+                  color: #8b93a7; margin-top: 14px; text-transform: none; letter-spacing: 0;
+                  font-weight: 400; }}
+  label.consent input {{ margin-top: 2px; }}
+  label.consent a {{ color: #4d9fff; }}
   .tokenline a {{ color: #4d9fff; text-decoration: none; }}
 </style>
 </head>
@@ -96,6 +101,9 @@ _LOGIN_PAGE = """<!DOCTYPE html>
       <label for="password">Password</label>
       <input id="password" name="password" type="password" required minlength="8" autocomplete="{autocomplete}">
       {extra_field}
+      <label class="consent"><input type="checkbox" name="accept_terms" value="1" required>
+        I agree to the <a href="/terms" target="_blank">Terms of Service</a> —
+        authorized testing only.</label>
       <button type="submit">{button_label}</button>
     </form>
     <div class="alt">{alt}</div>
@@ -120,6 +128,37 @@ def load_or_create_token(reports_dir: Path) -> str:
     token_path.parent.mkdir(parents=True, exist_ok=True)
     token_path.write_text(token, encoding="utf-8")
     return token
+
+_LEGAL_PAGE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentinel - {title}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: #07080b; color: #e8edf4;
+         min-height: 100vh; padding: 36px 20px; line-height: 1.65; }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 17px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 650;
+       margin-bottom: 18px; }
+  h2 { font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: #2ee6a6;
+       margin: 22px 0 6px; }
+  p { color: #b9c1d4; font-size: 14px; margin: 8px 0; }
+  p.fine { font-size: 12.5px; color: #8b93a7; margin-top: 26px; }
+  p.none { color: #ff3b5c; }
+  a { color: #4d9fff; text-decoration: none; }
+  code { color: #2ee6a6; font-size: 12.5px; background: #10131a; padding: 2px 7px;
+         border-radius: 6px; border: 1px solid rgba(232,237,244,0.1); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    {body}
+    <p class="fine"><a href="/">&#8592; Back</a></p>
+  </div>
+</body>
+</html>"""
 
 _INVITES_PAGE = r"""<!DOCTYPE html>
 <html lang="en">
@@ -394,6 +433,13 @@ _PAGE = r"""
       border-color: rgba(255,59,92,0.35);
       background: rgba(255,59,92,0.08);
     }
+
+    .legal-foot {
+      display: flex; gap: 16px; align-items: center;
+      padding: 14px 4px 2px; font-size: 11.5px; color: var(--faint);
+    }
+    .legal-foot a { color: var(--faint); }
+    .legal-foot a:hover { color: var(--acc); }
 
     #status .sdot {
       width: 6px;
@@ -1442,6 +1488,44 @@ _PAGE = r"""
         } catch (e) { /* controls stay empty; CLI still works */ }
       }
 
+      // Terms gate: if a scan is refused for stale terms, offer immediate
+      // re-acceptance and retry once the user confirms.
+      var termsAccepting = false;
+      async function acceptTermsAndRetry(cfg, skip) {
+        if (termsAccepting) return;
+        termsAccepting = true;
+        try {
+          var csrf = document.querySelector('input[name="csrf_token"]');
+          if (!csrf) { setRunState("cannot accept terms (no csrf) - reload the page", "err"); return; }
+          var fd = new FormData();
+          fd.append("csrf_token", csrf.value);
+          var res = await fetch("/terms/accept?next=/", { method: "POST", body: fd });
+          if (res.ok || res.redirected) {
+            setRunState("terms accepted - starting scan…");
+            var retry = await fetch("/api/scan", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ config: cfg, skip_llm: skip, authorized: true }),
+            });
+            var rd = await retry.json();
+            if (retry.ok) {
+              scanRunning = true;
+              setRunBtn();
+              setRunState((rd.config || cfg) + " · starting…");
+              pollScanStatus();
+            } else {
+              setRunState(rd.error || "failed to start", "err");
+            }
+          } else {
+            setRunState("could not record terms acceptance - try again", "err");
+          }
+        } catch (e) {
+          setRunState("failed to reach dashboard API", "err");
+        } finally {
+          termsAccepting = false;
+        }
+      }
+
       function pollScanStatus() {
         if (scanPolling) return;
         scanPolling = true;
@@ -1487,6 +1571,11 @@ _PAGE = r"""
           });
           var data = await res.json();
           if (!res.ok) {
+            if (data.code === "terms_required") {
+              setRunState("terms update: re-accept to continue scanning…");
+              acceptTermsAndRetry(cfg, !!(skip && skip.checked));
+              return;
+            }
             setRunState(data.error || "failed to start", "err");
             return;
           }
@@ -1959,6 +2048,11 @@ _PAGE = r"""
       setInterval(poll, POLL_MS);
     })();
   </script>
+  <footer class="legal-foot">
+    <span>Sentinel scans only sites you own or are permitted to test.</span>
+    <a href="/terms">Terms</a>
+    <a href="/abuse">Report abuse</a>
+  </footer>
 </body>
 </html>
 
@@ -2048,6 +2142,11 @@ def create_app(
         # Health check is public (uptime monitors, the reverse proxy).
         if request.path == "/healthz":
             return None
+        # Legal pages are public - hosts, targets, and prospective users
+        # must be able to read the terms and find the abuse contact
+        # without an account.
+        if request.path in ("/terms", "/abuse"):
+            return None
         # Auth routes are the exception - that's how you get in.
         if request.path in ("/login", "/signup", "/token-login"):
             return None
@@ -2071,6 +2170,57 @@ def create_app(
     def healthz():
         """Public liveness probe for the reverse proxy and uptime monitors."""
         return jsonify({"ok": True})
+
+    # --- Public legal pages (Phase 3) -----------------------------------------
+
+    @app.get("/terms")
+    def terms_page():
+        from qaagent import terms as _terms
+
+        return _LEGAL_PAGE.replace("{title}", "Terms of Service").replace(
+            "{body}", _terms.terms_html()
+        )
+
+    @app.get("/abuse")
+    def abuse_page():
+        from qaagent import terms as _terms
+
+        email, url = _terms.abuse_contact()
+        lines = [
+            "<p>Report misuse of this Sentinel deployment (unauthorized "
+            "scanning, abusive traffic, illegal content): a report channel "
+            "is listed below. Reports are reviewed promptly and offending "
+            "accounts are suspended.</p>",
+            "<h2>Contact</h2>",
+        ]
+        if email:
+            import html as _html
+
+            lines.append(
+                f'<p>Email: <a href="mailto:{_html.escape(email, quote=True)}">'
+                f'{_html.escape(email)}</a></p>'
+            )
+        if url:
+            import html as _html
+
+            lines.append(
+                f'<p>Web form: <a href="{_html.escape(url, quote=True)}" rel="nofollow noopener">'
+                f'{_html.escape(url)}</a></p>'
+            )
+        if not email and not url:
+            lines.append(
+                '<p class="none">No dedicated abuse contact is configured for '
+                "this deployment yet - the operator should set "
+                "<code>SENTINEL_ABUSE_EMAIL</code>.</p>"
+            )
+        lines.append(
+            '<p class="fine">Please include the target domain, timestamps, and '
+            "any source identifiers you can see - it makes investigation faster. "
+            'See also the <a href="/terms">Terms of Service</a>.</p>'
+        )
+        return _LEGAL_PAGE.replace("{title}", "Report abuse").replace(
+            "{body}", "\n".join(lines)
+        )
 
     @app.context_processor
     def _inject_user():
@@ -2207,6 +2357,15 @@ def create_app(
                     "admin for a fresh one.",
                     policy="invite",
                 )
+        # Phase 3 legal layer: consent must be explicit (the checkbox is also
+        # required in the form, but never trust the client alone).
+        if not request.form.get("accept_terms"):
+            return _auth_page(
+                "signup",
+                "Create an account to run scans and view reports.",
+                "You must accept the Terms of Service to create an account.",
+                policy=policy,
+            )
         try:
             uid = users.create_user(email, password, role="admin" if first else "user")
         except ValueError as exc:
@@ -2214,6 +2373,11 @@ def create_app(
         if uid is None:
             return _auth_page("signup", "Create an account to run scans and view reports.", "That email is already registered - sign in instead.", policy=policy)
         limiter.reset(f"signup:{ip}")
+        # Record the acceptance that came with the signup (same version the
+        # form linked to; re-accepted on version bumps via /terms/accept).
+        from qaagent.terms import TERMS_VERSION
+
+        users.accept_terms(uid, TERMS_VERSION, ip=ip)
         login_user(uid)
         return redirect("/")
 
@@ -2274,6 +2438,29 @@ def create_app(
             return redirect("/invites")
         users.create_invite(created_by=int(u["id"]))
         return redirect("/invites")
+
+    # --- Terms acceptance (Phase 3 legal layer) -------------------------------
+
+    def _terms_current(u) -> bool:
+        """True if this account has accepted the current terms version."""
+        if u is None:
+            return True  # token callers are the operator, not a terms party
+        from qaagent.terms import TERMS_VERSION
+
+        return users.terms_accepted_version(int(u["id"])) == TERMS_VERSION
+
+    @app.post("/terms/accept")
+    def terms_accept():
+        u = _user()
+        if u is None or not csrf_valid(request.form):
+            return redirect("/terms")
+        from qaagent.terms import TERMS_VERSION
+
+        users.accept_terms(int(u["id"]), TERMS_VERSION, ip=_client_ip())
+        dest = request.args.get("next") or "/"
+        if not dest.startswith("/"):  # open-redirect guard
+            dest = "/"
+        return redirect(dest)
 
     @app.get("/")
     def index() -> str:
@@ -2351,6 +2538,18 @@ def create_app(
                 {
                     "error": "authorization required - confirm you own the site "
                     "or have permission to test it"
+                }
+            ), 403
+
+        # Phase 3 legal layer: logged-in starters must have accepted the
+        # current Terms of Service (signup consent or later re-acceptance).
+        u_terms = _user()
+        if u_terms is not None and not _terms_current(u_terms):
+            return jsonify(
+                {
+                    "error": "terms acceptance required - review and accept the "
+                    "current Terms of Service (see /terms) before scanning",
+                    "code": "terms_required",
                 }
             ), 403
 
