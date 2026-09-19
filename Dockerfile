@@ -6,7 +6,11 @@
 # Playwright base image so browser + OS deps are present - the hard part
 # of containerizing browser automation. The image version pins the browser
 # build; the matching Python client version must stay in lockstep.
-FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
+# Ubuntu 24.04 (noble) variant: ships Python 3.12, which the package
+# requires (>=3.12). The older jammy variant is Python 3.10 and fails the
+# install. The image version pins the browser build; the matching Python
+# client version must stay in lockstep.
+FROM mcr.microsoft.com/playwright/python:v1.49.0-noble
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
