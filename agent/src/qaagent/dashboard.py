@@ -2823,7 +2823,7 @@ def create_app(
             return jsonify({"error": "a scan is already running"}), 409
         reports_dir.mkdir(parents=True, exist_ok=True)
         log_path = reports_dir / "scan-ui.log"
-        args = [sys.executable, "-m", "qaagent", "run", "--config", name]
+        args = [sys.executable, "-u", "-m", "qaagent", "run", "--config", name]
         if skip_llm:
             args.append("--skip-llm")
         # Ownership: the scan belongs to whoever clicked Run. The subprocess

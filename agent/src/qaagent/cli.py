@@ -169,9 +169,23 @@ def _anchor_output_dir(cfg: RunConfig, config_path: Path | None, project_root: P
     project's reports folder. This keeps `sentinel run` and `sentinel
     dashboard` writing to one place no matter which directory they are
     launched from (the home-dir trap that stranded reports in ~/reports).
+
+    Hosted exception: when SENTINEL_DATA_DIR is set, configs live on the
+    volume (SENTINEL_CONFIG_DIR, e.g. /data/configs) while the dashboard
+    reads reports from the data root (/data/reports). Anchoring to the
+    config's folder would strand reports in /data/configs/reports where
+    the dashboard never looks - so anchor to the data root instead.
     """
     if cfg.output_dir.is_absolute():
         return
+    data_dir = os.environ.get("SENTINEL_DATA_DIR")
+    if data_dir and config_path is not None:
+        try:
+            config_path.resolve().relative_to(Path(data_dir).resolve())
+            cfg.output_dir = Path(data_dir) / cfg.output_dir
+            return
+        except ValueError:
+            pass
     base = config_path.parent if config_path is not None else project_root
     cfg.output_dir = base / cfg.output_dir
 
