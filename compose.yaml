@@ -19,6 +19,14 @@ services:
       FORWARDED_ALLOW_IPS: caddy
       SENTINEL_DATA_DIR: /data
       SENTINEL_CONFIG_DIR: /data/configs
+      # Phase 3 launch safety (see agent/docs/DEPLOYMENT.md):
+      # block private/loopback/metadata scan targets.
+      SENTINEL_PUBLIC_MODE: "1"
+      # Per-user daily scan quota (0 disables).
+      SENTINEL_DAILY_SCAN_LIMIT: "20"
+      # Leave unset for invite-only signup; set to 1 on private/firewalled
+      # deployments to let anyone register.
+      SENTINEL_OPEN_SIGNUP: ""
     expose:
       - "8000"
     volumes:

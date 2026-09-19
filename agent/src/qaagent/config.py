@@ -89,6 +89,11 @@ class RunConfig(BaseModel):
     # unset, producing ownerless reports that only admins can see.
     owner_id: int | None = None
     owner_email: str | None = None
+    # Phase 3 authorization declaration, stamped onto reports: the starter's
+    # assertion that they may test this target (who, when, from where).
+    authorized_by: str | None = None
+    authorized_at: str | None = None
+    authorized_ip: str | None = None
 
     @field_validator("sensitive_files")
     @classmethod

@@ -53,6 +53,9 @@ class Agent:
             status="running",
             owner_id=self.config.owner_id,
             owner_email=self.config.owner_email,
+            authorized_by=self.config.authorized_by,
+            authorized_at=self.config.authorized_at,
+            authorized_ip=self.config.authorized_ip,
         )
         collector = Collector()
         live = LiveState(self.config.output_dir / "live.json")

@@ -148,6 +148,11 @@ class Report(BaseModel):
     # CLI runs before accounts existed, or token/API runs - visible to admins only.
     owner_id: int | None = None
     owner_email: str | None = None
+    # Phase 3 authorization declaration (who asserted permission to test,
+    # when, from where). Written to every report for the audit trail.
+    authorized_by: str | None = None
+    authorized_at: str | None = None
+    authorized_ip: str | None = None
 
     def build_summary(self) -> ReportSummary:
         by_severity = {sev.value: 0 for sev in SEVERITY_ORDER}

@@ -207,9 +207,15 @@ def test_dashboard_account_flow(tmp_path):
     csrf = re.search(r'name="csrf_token" value="([^"]+)"', signup_page).group(1)
 
     # Signup the first user (becomes admin), then land on the dashboard.
+    # Closed signup: the first account must present the bootstrap token.
     resp = client.post(
         "/signup",
-        data={"email": "owner@example.com", "password": "supersecret9", "csrf_token": csrf},
+        data={
+            "email": "owner@example.com",
+            "password": "supersecret9",
+            "csrf_token": csrf,
+            "bootstrap_token": "tok",
+        },
         follow_redirects=True,
     )
     body = resp.get_data(as_text=True)
@@ -443,15 +449,20 @@ def test_live_state_roundtrip(tmp_path):
     assert data["report_path"] == "reports/x.md"
 
 
-def _signup(client, email: str) -> None:
-    """Create an account through the real signup form (CSRF included)."""
+def _signup(client, email: str, *, bootstrap_token: str | None = None, invite_code: str | None = None) -> None:
+    """Create an account through the real signup form (CSRF + policy included)."""
     import re
 
     html = client.get("/signup").get_data(as_text=True)
     csrf = re.search(r'name="csrf_token" value="([^"]+)"', html).group(1)
+    data = {"email": email, "password": "supersecret9", "csrf_token": csrf}
+    if bootstrap_token is not None:
+        data["bootstrap_token"] = bootstrap_token
+    if invite_code is not None:
+        data["invite_code"] = invite_code
     resp = client.post(
         "/signup",
-        data={"email": email, "password": "supersecret9", "csrf_token": csrf},
+        data=data,
         follow_redirects=True,
     )
     assert resp.status_code == 200
@@ -534,7 +545,7 @@ def test_reports_isolated_between_accounts(tmp_path):
     _scan.update(owner_id=1, owner_email="admin@example.com")
     try:
         admin = app.test_client()
-        _signup(admin, "admin@example.com")  # first user -> admin
+        _signup(admin, "admin@example.com", bootstrap_token="tok")  # first user becomes admin
 
         # Admin sees everything: the newest report (ownerless) is visible.
         rep = json.loads(admin.get("/api/report").get_data(as_text=True))
@@ -543,8 +554,12 @@ def test_reports_isolated_between_accounts(tmp_path):
         st = json.loads(admin.get("/api/state").get_data(as_text=True))
         assert st["status"] == "running"
 
+        # Second user -> regular; closed signup requires an invite code.
+        from qaagent.auth import UserStore
+
+        users = UserStore(tmp_path / "users.db")
         member = app.test_client()
-        _signup(member, "member@example.com")  # second user -> regular
+        _signup(member, "member@example.com", invite_code=users.create_invite(created_by=1))
 
         # Member sees only their own report (the ownerless one is hidden).
         rep2 = json.loads(member.get("/api/report").get_data(as_text=True))
@@ -560,7 +575,7 @@ def test_reports_isolated_between_accounts(tmp_path):
 
         # A third account starts completely clean.
         third = app.test_client()
-        _signup(third, "third@example.com")
+        _signup(third, "third@example.com", invite_code=users.create_invite(created_by=1))
         rep3 = json.loads(third.get("/api/report").get_data(as_text=True))
         assert rep3["path"] is None
         st4 = json.loads(third.get("/api/state").get_data(as_text=True))
@@ -611,7 +626,7 @@ def test_report_downloads_and_history(tmp_path):
     _scan.update(owner_id=1, owner_email="admin@example.com")
     try:
         admin = app.test_client()
-        _signup(admin, "admin@example.com")  # first user -> admin
+        _signup(admin, "admin@example.com", bootstrap_token="tok")  # first user becomes admin
 
         # History lists the run with a Test IO flag + severity summary.
         hist = json.loads(admin.get("/api/history").get_data(as_text=True))
@@ -632,8 +647,11 @@ def test_report_downloads_and_history(tmp_path):
         assert "00-INDEX.md" in names
 
         # The owning member can download their own run's artifacts.
+        from qaagent.auth import UserStore
+
+        users = UserStore(tmp_path / "users.db")
         member = app.test_client()
-        _signup(member, "member@example.com")
+        _signup(member, "member@example.com", invite_code=users.create_invite(created_by=1))
         r = member.get(f"/api/report/{stamp}/md")
         assert r.status_code == 200 and b"# report" in r.data
         hist2 = json.loads(member.get("/api/history").get_data(as_text=True))
@@ -641,7 +659,7 @@ def test_report_downloads_and_history(tmp_path):
 
         # A non-owner is blocked on every artifact.
         third = app.test_client()
-        _signup(third, "third@example.com")
+        _signup(third, "third@example.com", invite_code=users.create_invite(created_by=1))
         for fmt in ("md", "csv", "html", "json", "testio"):
             r = third.get(f"/api/report/{stamp}/{fmt}")
             assert r.status_code == 403, fmt

@@ -424,6 +424,11 @@ def run(
     if env_owner_id and env_owner_id.isdigit():
         overrides["owner_id"] = int(env_owner_id)
         overrides["owner_email"] = os.environ.get("SENTINEL_OWNER_EMAIL") or None
+    # Phase 3 authorization declaration - recorded on every report.
+    if os.environ.get("SENTINEL_AUTHORIZED"):
+        overrides["authorized_by"] = os.environ.get("SENTINEL_AUTHORIZED_BY") or None
+        overrides["authorized_at"] = os.environ.get("SENTINEL_AUTHORIZED_AT") or None
+        overrides["authorized_ip"] = os.environ.get("SENTINEL_AUTHORIZED_IP") or None
     if overrides:
         cfg = RunConfig.model_validate({**cfg.model_dump(), **overrides})
 

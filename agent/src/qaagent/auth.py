@@ -16,6 +16,7 @@ The bootstrap dashboard token still works: it is the admin/API mechanism
 
 from __future__ import annotations
 
+import os
 import secrets
 import sqlite3
 import threading
@@ -32,6 +33,14 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'user',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS invites (
+    code TEXT PRIMARY KEY,
+    created_by INTEGER,
+    used_by INTEGER,
+    used_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
@@ -92,6 +101,59 @@ class UserStore:
     def count(self) -> int:
         with self._lock, self._conn() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+
+    # --- Invite codes (Phase 3: closed signup) -------------------------------
+
+    def create_invite(self, created_by: int | None = None) -> str:
+        """Mint a single-use signup code (URL-safe, unguessable)."""
+        code = secrets.token_urlsafe(12)
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT INTO invites (code, created_by) VALUES (?, ?)",
+                (code, created_by),
+            )
+        return code
+
+    def use_invite(self, code: str) -> bool:
+        """Consume a code atomically; True only if it existed and was unused."""
+        if not code:
+            return False
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE invites SET used_by = -1, used_at = datetime('now') "
+                "WHERE code = ? AND used_by IS NULL",
+                (code.strip(),),
+            )
+            return cur.rowcount == 1
+
+    def list_invites(self) -> list[sqlite3.Row]:
+        with self._lock, self._conn() as conn:
+            return conn.execute(
+                "SELECT code, created_by, used_by, used_at, created_at "
+                "FROM invites ORDER BY created_at DESC LIMIT 100"
+            ).fetchall()
+
+
+# --- Signup policy (Phase 3) ---------------------------------------------------
+
+def signup_policy(user_count: int) -> str:
+    """Who may create an account on this instance right now.
+
+    Returns one of:
+    - "bootstrap" — no users yet: signup requires the dashboard token, so only
+      the operator (who printed the tokened URL) can claim the admin account.
+      This holds even with open signup configured — it closes the window where
+      a stranger claims admin on a fresh instance before the operator does.
+    - "invite"    — default: signup requires a single-use admin-minted code.
+    - "open"      — SENTINEL_OPEN_SIGNUP=1: anyone may sign up (private or
+      firewalled deployments only).
+    """
+    open_env = os.environ.get("SENTINEL_OPEN_SIGNUP", "").strip().lower() in (
+        "1", "true", "yes",
+    )
+    if user_count == 0:
+        return "bootstrap"
+    return "open" if open_env else "invite"
 
 
 # --- Rate limiting (per-IP sliding window) -----------------------------------

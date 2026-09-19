@@ -17,6 +17,7 @@ from pathlib import Path
 from flask import Flask, jsonify, redirect, request, send_file, session, url_for
 
 from qaagent.auth import (
+    signup_policy,
     RateLimiter,
     UserStore,
     csrf_token,
@@ -94,6 +95,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
       <input id="email" name="email" type="email" required autocomplete="email" autofocus>
       <label for="password">Password</label>
       <input id="password" name="password" type="password" required minlength="8" autocomplete="{autocomplete}">
+      {extra_field}
       <button type="submit">{button_label}</button>
     </form>
     <div class="alt">{alt}</div>
@@ -118,6 +120,58 @@ def load_or_create_token(reports_dir: Path) -> str:
     token_path.parent.mkdir(parents=True, exist_ok=True)
     token_path.write_text(token, encoding="utf-8")
     return token
+
+_INVITES_PAGE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentinel - Invites</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: #07080b; color: #e8edf4;
+         min-height: 100vh; padding: 32px 20px; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 17px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 650; }
+  .sub { color: #8b93a7; font-size: 12.5px; margin: 8px 0 22px; line-height: 1.5; }
+  form.gen { display: flex; gap: 10px; margin-bottom: 24px; }
+  form.gen button { height: 38px; padding: 0 18px; border-radius: 8px; cursor: pointer;
+           border: 1px solid rgba(46,230,166,0.35); color: #2ee6a6; font-weight: 700;
+           background: linear-gradient(180deg, rgba(46,230,166,0.16), rgba(46,230,166,0.08));
+           font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-family: inherit; }
+  form.gen button:hover { background: rgba(46,230,166,0.22); }
+  table { width: 100%; border-collapse: collapse; background: #10131a;
+          border: 1px solid rgba(232,237,244,0.1); border-radius: 12px; overflow: hidden; }
+  th { text-align: left; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+       color: #5a6276; padding: 10px 14px; border-bottom: 1px solid rgba(232,237,244,0.08); }
+  td { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid rgba(232,237,244,0.05);
+       color: #b9c1d4; }
+  tr:last-child td { border-bottom: none; }
+  td code { color: #2ee6a6; font-size: 12.5px; }
+  td.none { text-align: center; color: #5a6276; padding: 22px; }
+  .st { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;
+        border-radius: 20px; padding: 3px 9px; }
+  .st.open { background: rgba(46,230,166,0.12); color: #2ee6a6; border: 1px solid rgba(46,230,166,0.3); }
+  .st.used { background: rgba(139,147,167,0.1); color: #8b93a7; border: 1px solid rgba(139,147,167,0.25); }
+  a.back { color: #4d9fff; text-decoration: none; font-size: 12.5px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Invite codes</h1>
+    <p class="sub">Signup is by invitation. Each code works exactly once - share it with
+    someone you trust to scan their own sites. <a class="back" href="/">&#8592; Back to dashboard</a></p>
+    <form class="gen" method="post" action="/invites">
+      <input type="hidden" name="csrf_token" value="{csrf}">
+      <button type="submit">Generate invite code</button>
+    </form>
+    <table>
+      <tr><th>Code</th><th>Created</th><th>Status</th><th>Used</th></tr>
+      {rows}
+    </table>
+  </div>
+</body>
+</html>"""
 
 _PAGE = r"""
 <!DOCTYPE html>
@@ -1222,6 +1276,11 @@ _PAGE = r"""
         <span class="tg"></span>
         <span class="tlabel">skip LLM</span>
       </label>
+      <label class="runtoggle" title="Required: confirm you own this site or have permission to test it. The declaration is recorded on every report.">
+        <input type="checkbox" id="run-authorized" />
+        <span class="tg"></span>
+        <span class="tlabel">I own / may test this site</span>
+      </label>
       <button id="run-btn" type="button">Run scan</button>
       <div class="runstate" id="run-state"></div>
     </section>
@@ -1409,13 +1468,22 @@ _PAGE = r"""
       async function startScan() {
         var sel = document.getElementById("run-config");
         var skip = document.getElementById("run-skipllm");
+        var authz = document.getElementById("run-authorized");
         var cfg = sel ? sel.value : "";
         if (!cfg) { setRunState("no config selected", "err"); return; }
+        if (authz && !authz.checked) {
+          setRunState("confirm authorization first - check \u201cI own / may test this site\u201d", "err");
+          return;
+        }
         try {
           var res = await fetch("/api/scan", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ config: cfg, skip_llm: !!(skip && skip.checked) }),
+            body: JSON.stringify({
+              config: cfg,
+              skip_llm: !!(skip && skip.checked),
+              authorized: !!(authz && authz.checked),
+            }),
           });
           var data = await res.json();
           if (!res.ok) {
@@ -1909,6 +1977,12 @@ def create_app(
     root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
     token = auth_token or load_or_create_token(reports_dir)
     app.secret_key = secret_key or secrets.token_hex(32)
+    # Phase 3: public mode blocks private/loopback/metadata scan targets and
+    # enforces the per-user daily quota. Local dev stays unrestricted by default.
+    public_mode = os.environ.get("SENTINEL_PUBLIC_MODE", "").strip().lower() in (
+        "1", "true", "yes",
+    )
+    daily_limit = int(os.environ.get("SENTINEL_DAILY_SCAN_LIMIT", "20") or "20")
 
     # Production posture: behind a TLS-terminating reverse proxy (see
     # docs/DEPLOYMENT.md). Cookies are Secure whenever the request arrived
@@ -2004,13 +2078,28 @@ def create_app(
 
     # --- Auth routes ---------------------------------------------------------
 
-    def _auth_page(mode: str, subtitle: str, flash: str = "", flash_ok: bool = False):
+    def _auth_page(mode: str, subtitle: str, flash: str = "", flash_ok: bool = False, policy: str = ""):
         if mode == "signup":
             action, button = "/signup", "Create account"
             alt = 'Already registered? <a href="/login">Sign in</a>'
+            if policy == "bootstrap":
+                extra_field = (
+                    '<label for="bootstrap_token">Access token</label>'
+                    '<input id="bootstrap_token" name="bootstrap_token" type="password" '
+                    'required autocomplete="off">'
+                )
+            elif policy == "invite":
+                extra_field = (
+                    '<label for="invite_code">Invite code</label>'
+                    '<input id="invite_code" name="invite_code" type="text" required '
+                    'autocomplete="off" placeholder="XXXXX-XXXXX-XXXXX">'
+                )
+            else:
+                extra_field = ""
         else:
             action, button = "/login", "Sign in"
             alt = 'No account yet? <a href="/signup">Create one</a>'
+            extra_field = ""
         flash_cls = "flash flash-ok" if flash_ok and flash else "flash"
         return _LOGIN_PAGE.format(
             subtitle=subtitle,
@@ -2021,6 +2110,7 @@ def create_app(
             button_label=button,
             alt=alt,
             token=token,
+            extra_field=extra_field,
         )
 
     @app.get("/login")
@@ -2061,13 +2151,20 @@ def create_app(
     def signup():
         if _user() is not None:
             return redirect("/")
-        first = users.count() == 0
-        subtitle = (
-            "Create the admin account - the first user owns this Sentinel."
-            if first
-            else "Create an account to run scans and view reports."
-        )
-        return _auth_page("signup", subtitle)
+        policy = signup_policy(users.count())
+        if policy == "bootstrap":
+            subtitle = (
+                "Create the admin account - paste the access token from the "
+                "URL printed by `sentinel dashboard` to prove you own this server."
+            )
+        elif policy == "open":
+            subtitle = "Create an account to run scans and view reports."
+        else:
+            subtitle = (
+                "Signup is by invitation. Enter the invite code you were "
+                "given, or ask an admin for one."
+            )
+        return _auth_page("signup", subtitle, policy=policy)
 
     @app.post("/signup")
     def signup_post():
@@ -2082,12 +2179,40 @@ def create_app(
         email = request.form.get("email", "").strip()
         password = request.form.get("password", "")
         first = users.count() == 0
+        policy = signup_policy(users.count())
+        # Phase 3 gate: closed signup. The first (admin) account must present
+        # the dashboard bootstrap token; later accounts need a single-use
+        # invite code minted by an admin. Open signup is an explicit env opt-in.
+        if policy == "bootstrap":
+            provided = request.form.get("bootstrap_token", "")
+            if not secrets.compare_digest(provided, token):
+                limiter.hit(f"signup:{ip}")
+                return _auth_page(
+                    "signup",
+                    "Create the admin account - paste the access token from the "
+                    "URL printed by `sentinel dashboard` to prove you own this server.",
+                    "Access token missing or wrong - the first account is "
+                    "reserved for the server operator.",
+                    policy="bootstrap",
+                )
+        elif policy == "invite":
+            code = request.form.get("invite_code", "")
+            if not users.use_invite(code):
+                limiter.hit(f"signup:{ip}")
+                return _auth_page(
+                    "signup",
+                    "Signup is by invitation. Enter the invite code you were "
+                    "given, or ask an admin for one.",
+                    "That invite code is not valid (or already used) - ask an "
+                    "admin for a fresh one.",
+                    policy="invite",
+                )
         try:
             uid = users.create_user(email, password, role="admin" if first else "user")
         except ValueError as exc:
-            return _auth_page("signup", "Create an account to run scans and view reports.", str(exc))
+            return _auth_page("signup", "Create an account to run scans and view reports.", str(exc), policy=policy)
         if uid is None:
-            return _auth_page("signup", "Create an account to run scans and view reports.", "That email is already registered - sign in instead.")
+            return _auth_page("signup", "Create an account to run scans and view reports.", "That email is already registered - sign in instead.", policy=policy)
         limiter.reset(f"signup:{ip}")
         login_user(uid)
         return redirect("/")
@@ -2112,6 +2237,43 @@ def create_app(
             return redirect("/")
         logout_user()
         return redirect("/login?out=1")
+
+    # --- Admin: invite codes (Phase 3 closed signup) -------------------------
+
+    @app.get("/invites")
+    def invites_page():
+        u = _user()
+        if u is None or u["role"] != "admin":
+            return redirect("/")
+        import html as _html
+
+        rows = ""
+        for inv in users.list_invites():
+            if inv["used_by"] is not None:
+                status = '<span class="st used">used</span>'
+            else:
+                status = '<span class="st open">open</span>'
+            rows += (
+                '<tr><td><code>' + _html.escape(inv["code"]) + '</code></td>'
+                '<td>' + (inv["created_at"] or "") + '</td>'
+                '<td>' + status + '</td>'
+                '<td>' + ((inv["used_at"] or "") if inv["used_by"] is not None else "")
+                + '</td></tr>'
+            )
+        if not rows:
+            rows = '<tr><td colspan="4" class="none">No invites yet - generate the first one.</td></tr>'
+        body = _INVITES_PAGE.replace("{rows}", rows).replace(
+            "{csrf}", csrf_token()
+        )
+        return body
+
+    @app.post("/invites")
+    def invites_create():
+        u = _user()
+        if u is None or u["role"] != "admin" or not csrf_valid(request.form):
+            return redirect("/invites")
+        users.create_invite(created_by=int(u["id"]))
+        return redirect("/invites")
 
     @app.get("/")
     def index() -> str:
@@ -2172,7 +2334,7 @@ def create_app(
 
     @app.post("/api/scan")
     def api_scan():
-        # Start a scan as a background process: {config, skip_llm}.
+        # Start a scan as a background process: {config, skip_llm, authorized}.
         # `config` may be an existing config name or a bare domain;
         # unknown domains get a config auto-created, matching the
         # `sentinel run --config somesite.com` CLI behavior.
@@ -2182,23 +2344,44 @@ def create_app(
         if not name or len(name) > 200 or any(c in name for c in '\\/:*?"<>|'):
             return jsonify({"error": "invalid config name"}), 400
 
-        # Resolve/auto-create the config exactly like the CLI does -
-        # same directory the run subprocess will search (SENTINEL_CONFIG_DIR).
+        # Phase 3 authorization: the starter asserts they may test this target;
+        # the declaration is stamped onto every report the run writes.
+        if not body.get("authorized"):
+            return jsonify(
+                {
+                    "error": "authorization required - confirm you own the site "
+                    "or have permission to test it"
+                }
+            ), 403
+
+        # Resolve the config exactly like the CLI does - same directory the
+        # run subprocess will search (SENTINEL_CONFIG_DIR) - but do not create
+        # anything yet: the policy check must gate before files are written.
         from qaagent.cli import _auto_create_config, _config_dir, _derive_target
 
         created = False
         probe = Path(name)
         config_dir = _config_dir()
-        exists = any(
-            (config_dir / cand).exists()
-            for cand in (
-                probe,
-                Path(f"config.{name}.yml"),
-                Path(f"{name}.yml"),
-                Path(f"config.{name}"),
-            )
-        )
-        if not exists:
+        config_path = None
+        for cand in (
+            probe,
+            Path(f"config.{name}.yml"),
+            Path(f"{name}.yml"),
+            Path(f"config.{name}"),
+        ):
+            if (config_dir / cand).exists():
+                config_path = config_dir / cand
+                break
+        if config_path is not None:
+            # The policy applies to the configured target, not the name.
+            import yaml as _yaml
+
+            try:
+                target = (_yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}).get("target")
+            except Exception:
+                target = None
+            target = target or _derive_target(name)
+        else:
             target = _derive_target(name)
             if target is None:
                 return jsonify(
@@ -2207,6 +2390,32 @@ def create_app(
                         "type a site like example.com, or create a config first"
                     }
                 ), 400
+
+        # Phase 3 target policy: public deployments must never scan internal
+        # networks (SSRF-style pivots) — check before creating or spawning.
+        from qaagent.netpolicy import target_is_allowed
+
+        allowed, reason = target_is_allowed(target or name, public_mode=public_mode)
+        if not allowed:
+            return jsonify({"error": f"target refused: {reason}"}), 403
+
+        # Phase 3 quota: per-user daily cap (token callers count separately).
+        u0 = _user()
+        if u0 is not None and daily_limit > 0:
+            from datetime import date
+
+            today = date.today().isoformat()
+            mine = [
+                r
+                for r in _own_reports(load_report_files(reports_dir))
+                if (r.get("started_at") or "")[:10] == today
+            ]
+            if len(mine) >= daily_limit:
+                return jsonify(
+                    {"error": f"daily scan limit reached ({daily_limit}/day) - resets at midnight UTC"}
+                ), 429
+
+        if config_path is None:
             _auto_create_config(name, target)
             created = True
 
@@ -2219,7 +2428,8 @@ def create_app(
         if skip_llm:
             args.append("--skip-llm")
         # Ownership: the scan belongs to whoever clicked Run. The subprocess
-        # reads SENTINEL_OWNER_* and stamps every report it writes with it.
+        # reads SENTINEL_OWNER_* and stamps every report it writes with it,
+        # plus the Phase 3 authorization declaration (who, when, from where).
         u = _user()
         env = os.environ.copy()
         if u is not None:
@@ -2228,6 +2438,10 @@ def create_app(
         else:
             env.pop("SENTINEL_OWNER_ID", None)
             env.pop("SENTINEL_OWNER_EMAIL", None)
+        env["SENTINEL_AUTHORIZED"] = "1"
+        env["SENTINEL_AUTHORIZED_AT"] = datetime.now(timezone.utc).isoformat()
+        env["SENTINEL_AUTHORIZED_BY"] = (u["email"] if u is not None else "bootstrap-token")
+        env["SENTINEL_AUTHORIZED_IP"] = _client_ip()
         log_fh = open(log_path, "w", encoding="utf-8")
         try:
             proc = subprocess.Popen(
