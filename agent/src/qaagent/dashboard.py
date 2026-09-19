@@ -1027,6 +1027,25 @@ _PAGE = r"""
     .hist-row .h-dl a:hover {
       color: var(--mint); border-color: rgba(46, 230, 166, 0.4);
     }
+    .hist-row { position: relative; }
+    .hist-row .h-sev {
+      flex: none; display: inline-flex; gap: 4px; align-items: center;
+    }
+    .hist-row .sev-badge {
+      font-size: 8.5px; letter-spacing: 0.08em; text-transform: uppercase;
+      font-family: var(--mono); padding: 1.5px 7px; border-radius: 999px;
+      border: 1px solid; line-height: 1.5;
+    }
+    .hist-row .sev-badge.crit { color: var(--crit); border-color: rgba(255,59,92,0.45); background: rgba(255,59,92,0.09); }
+    .hist-row .sev-badge.high { color: var(--high); border-color: rgba(255,122,47,0.45); background: rgba(255,122,47,0.09); }
+    .hist-row .sev-badge.med  { color: var(--med);  border-color: rgba(232,184,74,0.4);  background: rgba(232,184,74,0.08); }
+    .hist-row .sev-badge.low  { color: var(--low);  border-color: rgba(77,159,255,0.4);  background: rgba(77,159,255,0.08); }
+    .hist-row .sev-badge.info { color: var(--info); border-color: var(--line-2);      background: transparent; }
+    /* Worst-severity edge marker: a 3px stripe on the row's left. */
+    .hist-row::before {
+      content: ""; position: absolute; left: -18px; top: 15%; bottom: 15%;
+      width: 3px; border-radius: 2px; background: var(--edge, transparent);
+    }
     .hist-empty { color: var(--faint); font-size: 11.5px; padding: 10px 0; }
 
     .user-chip {
@@ -1719,6 +1738,39 @@ _PAGE = r"""
       }
 
       var histLoaded = false;
+      var SEV_RANK = ["critical", "high", "medium", "low", "info"];
+      var SEV_SHORT = { critical: "crit", high: "high", medium: "med", low: "low", info: "info" };
+      var SEV_EDGE = { critical: "var(--crit)", high: "var(--high)", medium: "var(--med)", low: "var(--low)", info: "var(--line-2)" };
+
+      function severityCounts(run) {
+        var s = run.summary || {};
+        if (s.by_severity) return s.by_severity;
+        if (s.critical !== undefined) return s;
+        return {};
+      }
+
+      function worstSeverity(run) {
+        var counts = severityCounts(run);
+        for (var i = 0; i < SEV_RANK.length; i++) {
+          var sev = SEV_RANK[i];
+          if ((counts[sev] || 0) > 0) return sev;
+        }
+        return null;
+      }
+
+      function severityBadges(run) {
+        var counts = severityCounts(run);
+        var badges = "";
+        for (var i = 0; i < SEV_RANK.length; i++) {
+          var sev = SEV_RANK[i];
+          var n = counts[sev] || 0;
+          if (n > 0) {
+            badges += '<span class="sev-badge ' + SEV_SHORT[sev] + '">' + sev + ' ' + n + '</span>';
+          }
+        }
+        return badges || '<span class="sev-badge info">clean</span>';
+      }
+
       function renderHistory(runs) {
         var wrap = document.getElementById("history");
         if (!wrap) return;
@@ -1729,12 +1781,16 @@ _PAGE = r"""
         wrap.innerHTML = runs.map(function (r) {
           var when = (r.started_at || "").replace("T", " ").slice(0, 16);
           var st = r.stamp || "";
+          var worst = worstSeverity(r);
+          var edge = worst ? SEV_EDGE[worst] : "var(--line)";
           var links = ["html", "csv", "json"]
             .map(function (f) { return '<a href="/api/report/' + st + '/' + f + '" download>' + f + '</a>'; })
             .join("");
           if (r.has_testio) links += '<a href="/api/report/' + st + '/testio" download>testio</a>';
-          return '<div class="hist-row">'
+          return '<div class="hist-row" style="--edge: ' + edge + '" title="Worst severity: '
+            + esc(worst || "none") + '">'
             + '<span class="h-when">' + esc(when) + '</span>'
+            + '<span class="h-sev">' + severityBadges(r) + '</span>'
             + '<span class="h-target">' + esc(r.target || "") + '</span>'
             + '<span class="h-count">' + (r.finding_count || 0) + ' findings</span>'
             + '<span class="h-dl">' + links + '</span>'

@@ -545,6 +545,11 @@ def test_report_downloads_and_history(tmp_path):
                 "owner_id": 2,
                 "owner_email": "member@example.com",
                 "findings": [{"title": "T", "severity": "low", "url": "http://x.test"}],
+                "summary": {
+                    "total": 1,
+                    "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 1, "info": 0},
+                    "by_category": {},
+                },
             }
         ),
         encoding="utf-8",
@@ -563,11 +568,12 @@ def test_report_downloads_and_history(tmp_path):
         admin = app.test_client()
         _signup(admin, "admin@example.com")  # first user -> admin
 
-        # History lists the run with a Test IO flag.
+        # History lists the run with a Test IO flag + severity summary.
         hist = json.loads(admin.get("/api/history").get_data(as_text=True))
         assert len(hist["runs"]) == 1
         run = hist["runs"][0]
         assert run["stamp"] == stamp and run["has_testio"] is True
+        assert run["summary"]["by_severity"]["low"] == 1
 
         # All four file downloads work for the owner (admin sees all).
         for fmt, marker in (("md", b"# report"), ("csv", b"a,b"), ("html", b"<h1>"), ("json", b"x.test")):
