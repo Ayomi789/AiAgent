@@ -1,0 +1,51 @@
+# Sentinel on Render (see agent/docs/DEPLOYMENT.md).
+#
+# No local Docker needed: Render builds the existing Playwright Dockerfile
+# on its side. You just push this repo to GitHub, then:
+#   Render dashboard -> New -> Blueprint -> pick this repo (render.yaml)
+#
+# After deploy, open https://<your-service>.onrender.com/healthz (expect
+# {"ok": true}), claim the admin account with the SENTINEL_TOKEN value,
+# then scan from the dashboard. Signup is invite-only after the first user.
+
+services:
+  - type: web
+    name: sentinel
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Chromium + scans need RAM: Standard (2 GB) minimum. Free/Starter
+    # (512 MB) will OOM when the browser launches.
+    plan: standard
+    healthCheckPath: /healthz
+    # All state (reports/, users.db, tokens, configs) on one persistent disk.
+    # Without this, reports and accounts vanish on every restart/redeploy.
+    disk:
+      name: sentinel-data
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: SENTINEL_DATA_DIR
+        value: /data
+      - key: SENTINEL_CONFIG_DIR
+        value: /data/configs
+      - key: BROWSER_CHANNEL
+        value: chromium
+      - key: SENTINEL_PUBLIC_MODE
+        value: "1"
+      - key: SENTINEL_DAILY_SCAN_LIMIT
+        value: "20"
+      - key: SENTINEL_OPEN_SIGNUP
+        value: ""
+      # Abuse contact shown on the public /abuse page. Set a real address.
+      - key: SENTINEL_ABUSE_EMAIL
+        value: abuse@example.com
+      # Secret: set in the Render dashboard (Environment -> Secret File or
+      # Environment Variable). Never commit the real key.
+      - key: NVIDIA_API_KEY
+        sync: false
+      # Bootstrap token: first visitor needs it to claim the admin account.
+      # Generate one (python -c "import secrets; print(secrets.token_urlsafe(32))")
+      # and paste it here as a secret; leave unset to auto-generate into
+      # /data/reports/.dashboard-token (read it from the disk via Shell).
+      - key: SENTINEL_TOKEN
+        sync: false

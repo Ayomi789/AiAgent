@@ -43,5 +43,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 # WSGI entrypoint (see wsgi.py). gunicorn is Unix-only - by design, this
 # image is the production target; local dev uses `sentinel dashboard`.
-CMD ["gunicorn", "--workers", "2", "--threads", "4", "--timeout", "600", \
-     "--access-logfile", "-", "--bind", "0.0.0.0:8000", "wsgi:app"]
+# Bind $PORT when the platform provides it (Render sets PORT=10000);
+# fall back to 8000 for local compose.
+CMD ["sh", "-c", "gunicorn --workers 2 --threads 4 --timeout 600 --access-logfile - --bind 0.0.0.0:${PORT:-8000} wsgi:app"]
