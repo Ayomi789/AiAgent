@@ -33,23 +33,16 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'user',
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    suspended INTEGER NOT NULL DEFAULT 0,
+    suspended_at TEXT,
+    suspend_reason TEXT
 );
 
-CREATE TABLE IF NOT EXISTS invites (
-    code TEXT PRIMARY KEY,
-    created_by INTEGER,
-    used_by INTEGER,
-    used_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS terms_acceptances (
-    user_id INTEGER PRIMARY KEY,
-    version TEXT NOT NULL,
-    accepted_at TEXT NOT NULL DEFAULT (datetime('now')),
-    ip TEXT
-);
+-- Pre-suspension user stores: add the columns if an older db lacks them.
+ALTER TABLE users ADD COLUMN suspended INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN suspended_at TEXT;
+ALTER TABLE users ADD COLUMN suspend_reason TEXT;
 """
 
 
@@ -61,7 +54,42 @@ class UserStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         with self._conn() as conn:
-            conn.executescript(_SCHEMA)
+            self._migrate(conn)
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Create the schema, then tolerate pre-existing older databases:
+        every ALTER fails silently if the column already exists."""
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS invites (
+                code TEXT PRIMARY KEY,
+                created_by INTEGER,
+                used_by INTEGER,
+                used_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS terms_acceptances (
+                user_id INTEGER PRIMARY KEY,
+                version TEXT NOT NULL,
+                accepted_at TEXT NOT NULL DEFAULT (datetime('now')),
+                ip TEXT
+            );
+        """)
+        for stmt in (
+            "ALTER TABLE users ADD COLUMN suspended INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN suspended_at TEXT",
+            "ALTER TABLE users ADD COLUMN suspend_reason TEXT",
+        ):
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
@@ -88,20 +116,24 @@ class UserStore:
             return int(cur.lastrowid)
 
     def verify(self, email: str, password: str) -> sqlite3.Row | None:
-        """Return the user row if the credentials are valid, else None."""
+        """Return the user row if the credentials are valid and the account
+        is not suspended, else None."""
         email = email.strip().lower()
         with self._lock, self._conn() as conn:
             row = conn.execute(
                 "SELECT * FROM users WHERE email = ?", (email,)
             ).fetchone()
-        if row and check_password_hash(row["password_hash"], password):
+        if row is None or row["suspended"]:
+            return None
+        if check_password_hash(row["password_hash"], password):
             return row
         return None
 
     def get(self, user_id: int) -> sqlite3.Row | None:
         with self._lock, self._conn() as conn:
             return conn.execute(
-                "SELECT id, email, role, created_at FROM users WHERE id = ?",
+                "SELECT id, email, role, created_at, suspended, suspended_at, "
+                "suspend_reason FROM users WHERE id = ?",
                 (user_id,),
             ).fetchone()
 
@@ -130,6 +162,27 @@ class UserStore:
     def count(self) -> int:
         with self._lock, self._conn() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+
+    # --- Moderation (Phase 3: admin console) ----------------------------------
+
+    def list_users(self) -> list[sqlite3.Row]:
+        """Every account, for the admin console (small deployments: fine)."""
+        with self._lock, self._conn() as conn:
+            return conn.execute(
+                "SELECT id, email, role, created_at, suspended, suspended_at, "
+                "suspend_reason FROM users ORDER BY id"
+            ).fetchall()
+
+    def set_suspended(self, user_id: int, suspended: bool, reason: str = "") -> bool:
+        """Suspend or reinstate an account. Returns True if a row changed."""
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE users SET suspended = ?, suspended_at = CASE WHEN ? "
+                "THEN datetime('now') ELSE NULL END, suspend_reason = ? WHERE id = ?",
+                (1 if suspended else 0, 1 if suspended else 0,
+                 reason if suspended else None, user_id),
+            )
+            return cur.rowcount == 1
 
     # --- Invite codes (Phase 3: closed signup) -------------------------------
 

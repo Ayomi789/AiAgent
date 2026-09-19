@@ -160,6 +160,80 @@ _LEGAL_PAGE = r"""<!DOCTYPE html>
 </body>
 </html>"""
 
+_ADMIN_PAGE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentinel - Admin</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: #07080b; color: #e8edf4;
+         min-height: 100vh; padding: 32px 20px; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 17px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 650; }
+  .sub { color: #8b93a7; font-size: 12.5px; margin: 8px 0 24px; line-height: 1.5; }
+  h2 { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #2ee6a6;
+       margin: 26px 0 10px; }
+  table { width: 100%; border-collapse: collapse; background: #10131a;
+          border: 1px solid rgba(232,237,244,0.1); border-radius: 12px; overflow: hidden; }
+  th { text-align: left; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+       color: #5a6276; padding: 10px 12px; border-bottom: 1px solid rgba(232,237,244,0.08); }
+  td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid rgba(232,237,244,0.05);
+       color: #b9c1d4; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  td code { color: #2ee6a6; font-size: 12px; }
+  td.none { text-align: center; color: #5a6276; padding: 22px; }
+  td.detail { color: #8b93a7; font-size: 12px; }
+  td.act form { display: flex; gap: 6px; align-items: center; }
+  td.act input[type=text] { height: 28px; background: #161b24; color: #e8edf4;
+          border: 1px solid rgba(232,237,244,0.12); border-radius: 6px; padding: 0 8px;
+          font-size: 11.5px; width: 150px; }
+  .mini { height: 28px; padding: 0 12px; border-radius: 6px; cursor: pointer; font-weight: 700;
+          font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; font-family: inherit; }
+  .mini.ok { border: 1px solid rgba(46,230,166,0.35); color: #2ee6a6; background: rgba(46,230,166,0.08); }
+  .mini.bad { border: 1px solid rgba(255,59,92,0.35); color: #ff3b5c; background: rgba(255,59,92,0.08); }
+  .mini:hover { filter: brightness(1.25); }
+  .selfnote { color: #5a6276; font-size: 11.5px; }
+  .st { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700;
+        border-radius: 20px; padding: 3px 9px; white-space: nowrap; }
+  .st.open { background: rgba(46,230,166,0.12); color: #2ee6a6; border: 1px solid rgba(46,230,166,0.3); }
+  .st.used { background: rgba(255,59,92,0.1); color: #ff3b5c; border: 1px solid rgba(255,59,92,0.3); }
+  .st.admin { background: rgba(77,159,255,0.12); color: #4d9fff; border: 1px solid rgba(77,159,255,0.3); }
+  .scanline { background: #10131a; border: 1px solid rgba(232,237,244,0.1); border-radius: 12px;
+              padding: 14px 16px; font-size: 13px; color: #b9c1d4; }
+  a.back { color: #4d9fff; text-decoration: none; font-size: 12.5px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Admin console</h1>
+    <p class="sub">{user_count} account(s) on this instance. Suspension takes effect on the
+    user's very next request; their reports stay retained for investigation.
+    <a class="back" href="/">&#8592; Back to dashboard</a></p>
+
+    <h2>Running scan</h2>
+    <div class="scanline">{scan_state}</div>
+
+    <h2>Accounts</h2>
+    <table>
+      <tr><th>Id</th><th>Email</th><th>Status</th><th>Detail</th><th>Action</th></tr>
+      {user_rows}
+    </table>
+
+    <h2>Invite codes</h2>
+    <form method="post" action="/invites" style="margin-bottom:12px">
+      <input type="hidden" name="csrf_token" value="{csrf}">
+      <button type="submit" class="mini ok">Generate invite code</button>
+    </form>
+    <table>
+      <tr><th>Code</th><th>Created</th><th>Status</th><th>Used</th></tr>
+      {invite_rows}
+    </table>
+  </div>
+</body>
+</html>"""
+
 _INVITES_PAGE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1192,6 +1266,8 @@ _PAGE = r"""
       border: 1px solid rgba(46, 230, 166, 0.35); background: rgba(46, 230, 166, 0.08);
       padding: 2.5px 8px; border-radius: 999px;
     }
+    .user-chip a.role { text-decoration: none; cursor: pointer; }
+    .user-chip a.role:hover { background: rgba(46, 230, 166, 0.18); }
     .user-chip form { display: inline-flex; margin: 0; }
     .user-chip button {
       appearance: none; display: inline-flex; align-items: center; gap: 6px;
@@ -2103,7 +2179,13 @@ def create_app(
         }
 
     def _user():
-        return current_user(users)
+        row = current_user(users)
+        # Suspended accounts lose their session immediately (Phase 3
+        # moderation): the very next request behaves as logged-out.
+        if row is not None and row["suspended"]:
+            logout_user()
+            return None
+        return row
 
     def _client_ip() -> str:
         return request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
@@ -2291,7 +2373,7 @@ def create_app(
             limiter.hit(f"login:{ip}")
             return _auth_page("login", "Sign in to run scans and view reports.", "Wrong email or password.")
         limiter.reset(f"login:{ip}")
-        login_user(int(row["id"]))
+        login_user(int(row["id"]))  # suspended accounts never verify (store-level)
         dest = request.args.get("next") or "/"
         if not dest.startswith("/"):  # open-redirect guard
             dest = "/"
@@ -2404,19 +2486,17 @@ def create_app(
 
     # --- Admin: invite codes (Phase 3 closed signup) -------------------------
 
-    @app.get("/invites")
-    def invites_page():
-        u = _user()
-        if u is None or u["role"] != "admin":
-            return redirect("/")
+    def _invite_rows() -> str:
+        """Rendered invite table rows, shared by /invites and /admin."""
         import html as _html
 
         rows = ""
         for inv in users.list_invites():
-            if inv["used_by"] is not None:
-                status = '<span class="st used">used</span>'
-            else:
-                status = '<span class="st open">open</span>'
+            status = (
+                '<span class="st used">used</span>'
+                if inv["used_by"] is not None
+                else '<span class="st open">open</span>'
+            )
             rows += (
                 '<tr><td><code>' + _html.escape(inv["code"]) + '</code></td>'
                 '<td>' + (inv["created_at"] or "") + '</td>'
@@ -2424,12 +2504,19 @@ def create_app(
                 '<td>' + ((inv["used_at"] or "") if inv["used_by"] is not None else "")
                 + '</td></tr>'
             )
-        if not rows:
-            rows = '<tr><td colspan="4" class="none">No invites yet - generate the first one.</td></tr>'
-        body = _INVITES_PAGE.replace("{rows}", rows).replace(
+        return (
+            rows
+            or '<tr><td colspan="4" class="none">No invites yet - generate the first one.</td></tr>'
+        )
+
+    @app.get("/invites")
+    def invites_page():
+        u = _user()
+        if u is None or u["role"] != "admin":
+            return redirect("/")
+        return _INVITES_PAGE.replace("{rows}", _invite_rows()).replace(
             "{csrf}", csrf_token()
         )
-        return body
 
     @app.post("/invites")
     def invites_create():
@@ -2438,6 +2525,119 @@ def create_app(
             return redirect("/invites")
         users.create_invite(created_by=int(u["id"]))
         return redirect("/invites")
+
+    # --- Admin console (Phase 3 moderation) -----------------------------------
+
+    def _admin_user_rows(viewer_id: int) -> str:
+        import html as _html
+
+        rows = ""
+        for row in users.list_users():
+            if row["suspended"]:
+                state = '<span class="st used">suspended</span>'
+                action = (
+                    '<form method="post" action="/admin/suspend">'
+                    '<input type="hidden" name="csrf_token" value="{csrf}">'
+                    '<input type="hidden" name="user_id" value="%d">'
+                    '<input type="hidden" name="suspended" value="0">'
+                    '<button type="submit" class="mini ok">Reinstate</button></form>'
+                ) % row["id"]
+                detail = (
+                    _html.escape(row["suspend_reason"] or "")
+                    + (" &middot; " + (row["suspended_at"] or "") if row["suspended_at"] else "")
+                )
+            else:
+                state = (
+                    '<span class="st open">active</span>'
+                    if row["role"] != "admin"
+                    else '<span class="st admin">admin</span>'
+                )
+                if row["id"] == viewer_id:
+                    action = '<span class="selfnote">that is you</span>'
+                    detail = ""
+                else:
+                    action = (
+                        '<form method="post" action="/admin/suspend">'
+                        '<input type="hidden" name="csrf_token" value="{csrf}">'
+                        '<input type="hidden" name="user_id" value="%d">'
+                        '<input type="hidden" name="suspended" value="1">'
+                        '<input type="text" name="reason" placeholder="reason (optional)" maxlength="200">'
+                        '<button type="submit" class="mini bad">Suspend</button></form>'
+                    ) % row["id"]
+                    detail = "joined " + (row["created_at"] or "")
+            rows += (
+                '<tr><td>#' + str(row["id"]) + '</td>'
+                '<td>' + _html.escape(row["email"] or "") + '</td>'
+                '<td>' + state + '</td>'
+                '<td class="detail">' + detail + '</td>'
+                '<td class="act">' + action + '</td></tr>'
+            )
+        return rows
+
+    @app.get("/admin")
+    def admin_page():
+        u = _user()
+        # Bootstrap-token callers administer the instance without an account
+        # (the token is the admin/API mechanism, same as report visibility).
+        token_caller = False
+        if u is None:
+            provided = (
+                request.headers.get("X-Sentinel-Token")
+                or request.args.get("token")
+                or request.cookies.get(_COOKIE)
+            )
+            if not (provided and secrets.compare_digest(provided, token)):
+                return redirect("/")
+            token_caller = True
+        elif u["role"] != "admin":
+            return redirect("/")
+        viewer_id = -1 if token_caller else int(u["id"])  # no "that is you" row
+        import html as _html
+
+        # Running scan card: global truth (scans are instance-wide), but the
+        # owner's email is shown only to admins - which is everyone here.
+        proc = _scan.get("proc")
+        running = proc is not None and proc.poll() is None
+        if running:
+            scan_state = (
+                '<span class="st admin">running</span> <code>'
+                + _html.escape(str(_scan.get("config") or "")) + '</code>'
+                + " started " + _html.escape(str(_scan.get("started") or ""))
+                + " by " + _html.escape(str(_scan.get("owner_email") or "token"))
+            )
+        else:
+            rc = proc.returncode if proc is not None else None
+            last = _scan.get("config")
+            scan_state = (
+                '<span class="st used">idle</span> last exit: '
+                + (_html.escape(str(rc)) if rc is not None else "n/a")
+                + (" &middot; last config: <code>" + _html.escape(str(last)) + "</code>" if last else "")
+            )
+        body = _ADMIN_PAGE.replace("{user_rows}", _admin_user_rows(viewer_id))
+        body = body.replace("{invite_rows}", _invite_rows())
+        body = body.replace("{scan_state}", scan_state)
+        body = body.replace("{csrf}", csrf_token())
+        body = body.replace("{user_count}", str(users.count()))
+        return body
+
+    @app.post("/admin/suspend")
+    def admin_suspend():
+        u = _user()
+        if u is None or u["role"] != "admin" or not csrf_valid(request.form):
+            return redirect("/admin")
+        raw = request.form.get("user_id", "")
+        if not raw.isdigit():
+            return redirect("/admin")
+        target_id = int(raw)
+        if target_id == int(u["id"]):
+            return redirect("/admin")  # never lock yourself out
+        suspend = request.form.get("suspended") == "1"
+        reason = request.form.get("reason", "").strip()[:200]
+        if suspend:
+            users.set_suspended(target_id, True, reason or "suspended by admin")
+        else:
+            users.set_suspended(target_id, False)
+        return redirect("/admin")
 
     # --- Terms acceptance (Phase 3 legal layer) -------------------------------
 
@@ -2471,8 +2671,8 @@ def create_app(
             email = u["email"] or ""
             initial = (email[:1] or "?").upper()
             role_badge = (
-                '<span class="role" title="This account manages this Sentinel instance">'
-                "admin</span>"
+                '<a class="role" href="/admin" title="Open the admin console">'
+                "admin</a>"
                 if u["role"] == "admin"
                 else ""
             )
