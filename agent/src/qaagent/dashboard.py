@@ -48,48 +48,60 @@ _LOGIN_PAGE = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sentinel - Sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ font-family: "Segoe UI", system-ui, sans-serif; background: #07080b; color: #e8edf4;
-         min-height: 100vh; display: grid; place-items: center; padding: 20px; }}
-  .card {{ width: 100%; max-width: 380px; background: #10131a; border: 1px solid rgba(232,237,244,0.1);
-          border-radius: 14px; padding: 28px; box-shadow: 0 24px 60px -28px rgba(0,0,0,0.72); }}
+  :focus-visible {{ outline: 2px solid #4c8dff; outline-offset: 1px; }}
+  ::selection {{ background: #234066; color: #e8ebee; }}
+  @media (prefers-reduced-motion: reduce) {{
+    *, *::before, *::after {{ animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }}
+  }}
+  body {{ font-family: "Inter", "Segoe UI", system-ui, sans-serif; background: #0b0d10; color: #e8ebee;
+         min-height: 100vh; display: grid; place-items: center; padding: 20px;
+         -webkit-font-smoothing: antialiased; }}
+  .card {{ width: 100%; max-width: 380px; background: #121417; border: 1px solid #22262c;
+          border-radius: 6px; padding: 28px; box-shadow: 0 24px 60px -28px rgba(0,0,0,0.72); }}
   .brand {{ display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }}
-  .mark {{ width: 34px; height: 34px; border-radius: 9px; background: #0e1218;
-          border: 1px solid rgba(46,230,166,0.28); display: grid; place-items: center; }}
+  .mark {{ width: 34px; height: 34px; border-radius: 6px; background: #16191d;
+          border: 1px solid #2c3138; display: grid; place-items: center; }}
   h1 {{ font-size: 17px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 650; }}
-  .sub {{ color: #8b93a7; font-size: 12.5px; margin: 10px 0 20px; line-height: 1.5; }}
+  .sub {{ color: #98a1ab; font-size: 12.5px; margin: 10px 0 20px; line-height: 1.5; }}
   label {{ display: block; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
-          color: #5a6276; font-weight: 600; margin: 12px 0 6px; }}
-  input[type=email], input[type=password] {{ width: 100%; height: 38px; background: #161b24;
-          border: 1px solid rgba(232,237,244,0.12); border-radius: 8px; color: #e8edf4;
-          padding: 0 12px; font-size: 14px; }}
-  input:focus {{ outline: 1px solid rgba(46,230,166,0.4); border-color: rgba(46,230,166,0.35); }}
-  button {{ width: 100%; height: 40px; margin-top: 18px; border-radius: 8px; cursor: pointer;
-           border: 1px solid rgba(46,230,166,0.35); color: #2ee6a6; font-weight: 700;
-           background: linear-gradient(180deg, rgba(46,230,166,0.16), rgba(46,230,166,0.08));
-           font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
-           font-family: inherit; }}
-  button:hover {{ background: rgba(46,230,166,0.22); }}
-  .alt {{ text-align: center; margin-top: 16px; font-size: 12.5px; color: #8b93a7; }}
-  .alt a {{ color: #2ee6a6; text-decoration: none; }}
-  .flash {{ background: rgba(255,59,92,0.1); border: 1px solid rgba(255,59,92,0.35); color: #ff3b5c;
-           border-radius: 8px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 6px; }}
-  .flash-ok {{ background: rgba(46,230,166,0.08); border: 1px solid rgba(46,230,166,0.35); color: #2ee6a6; }}
-  .tokenline {{ margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(232,237,244,0.08);
-               font-size: 12px; color: #8b93a7; text-align: center; }}
+          color: #6b747e; font-weight: 600; margin: 12px 0 6px; }}
+  input[type=email], input[type=password], input[type=text] {{ width: 100%; height: 38px; background: #0b0d10;
+          border: 1px solid #2c3138; border-radius: 5px; color: #e8ebee;
+          padding: 0 12px; font-size: 14px; font-family: inherit; }}
+  input:hover {{ border-color: #3a414a; }}
+  input:focus {{ outline: none; border-color: #4c8dff; background: #0e1013; }}
+  input::placeholder {{ color: #4d555e; }}
+  button {{ width: 100%; height: 40px; margin-top: 18px; border-radius: 5px; cursor: pointer;
+           border: 1px solid #e8ebee; color: #0b0d10; font-weight: 600;
+           background: #e8ebee; font-size: 12.5px; letter-spacing: 0.01em;
+           font-family: inherit; transition: background-color 120ms ease; }}
+  button:hover {{ background: #ffffff; border-color: #ffffff; }}
+  .alt {{ text-align: center; margin-top: 16px; font-size: 12.5px; color: #98a1ab; }}
+  .alt a {{ color: #7fa9f0; text-decoration: none; }}
+  .alt a:hover {{ text-decoration: underline; }}
+  .flash {{ background: rgba(229,72,77,0.12); border: 1px solid rgba(229,72,77,0.34); color: #f28286;
+           border-radius: 5px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 6px; }}
+  .flash-ok {{ background: rgba(70,167,88,0.11); border: 1px solid rgba(70,167,88,0.3); color: #66c07a; }}
+  .tokenline {{ margin-top: 18px; padding-top: 14px; border-top: 1px solid #22262c;
+               font-size: 12px; color: #98a1ab; text-align: center; }}
   label.consent {{ display: flex; gap: 8px; align-items: flex-start; font-size: 12px;
-                  color: #8b93a7; margin-top: 14px; text-transform: none; letter-spacing: 0;
+                  color: #98a1ab; margin-top: 14px; text-transform: none; letter-spacing: 0;
                   font-weight: 400; }}
-  label.consent input {{ margin-top: 2px; }}
-  label.consent a {{ color: #4d9fff; }}
-  .tokenline a {{ color: #4d9fff; text-decoration: none; }}
+  label.consent input {{ margin-top: 2px; accent-color: #4c8dff; }}
+  label.consent a {{ color: #7fa9f0; }}
+  .tokenline a {{ color: #7fa9f0; text-decoration: none; }}
+  .tokenline a:hover {{ text-decoration: underline; }}
 </style>
 </head>
 <body>
   <div class="card">
     <div class="brand">
-      <div class="mark"><svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.2" stroke="#2ee6a6" stroke-opacity="0.35"/><circle cx="10" cy="10" r="4.2" stroke="#2ee6a6" stroke-opacity="0.55"/><path d="M10 4.6V10l4.2 2.3" stroke="#2ee6a6" stroke-width="1.4" stroke-linecap="round"/><circle cx="10" cy="10" r="1.3" fill="#2ee6a6"/></svg></div>
+      <div class="mark"><svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.2" stroke="#4c8dff" stroke-opacity="0.35"/><circle cx="10" cy="10" r="4.2" stroke="#4c8dff" stroke-opacity="0.55"/><path d="M10 4.6V10l4.2 2.3" stroke="#4c8dff" stroke-width="1.4" stroke-linecap="round"/><circle cx="10" cy="10" r="1.3" fill="#4c8dff"/></svg></div>
       <h1>Sentinel</h1>
     </div>
     <p class="sub">{subtitle}</p>
