@@ -2257,7 +2257,7 @@ def create_app(
         UI fetches (and plain reloads) authenticate seamlessly."""
         provided = request.args.get("token")
         if provided and secrets.compare_digest(provided, token):
-            resp.set_cookie(_COOKIE, token, **_cookie_kwargs())
+            resp.set_cookie(_COOKIE, token, path="/", **_cookie_kwargs())
         return resp
 
     @app.get("/healthz")
@@ -2272,6 +2272,11 @@ def create_app(
         if u is None:
             return jsonify({"email": None, "admin": True})  # bootstrap-token caller
         return jsonify({"email": u.get("email"), "admin": u.get("role") == "admin"})
+
+    @app.get("/api/csrf")
+    def api_csrf():
+        """Session CSRF token for console mutations (logout, invites)."""
+        return jsonify({"csrf_token": csrf_token()})
 
     _UI_DIR = Path(__file__).resolve().parent / "ui"
 
@@ -2533,7 +2538,15 @@ def create_app(
         if not csrf_valid(request.form):
             return redirect(_home())
         logout_user()
-        return redirect("/login?out=1")
+        resp = redirect("/login?out=1")
+        # Token-cookie holders (token-login URL) have no session to clear -
+        # without this the cookie re-authenticates them on the next request
+        # and logout appears to do nothing. Both paths: current cookies are
+        # scoped site-wide, legacy ones may be scoped to /console/.
+        resp.delete_cookie(_COOKIE, path="/")
+        resp.delete_cookie(_COOKIE, path="/console/")
+        resp.delete_cookie(_COOKIE, path="/console")
+        return resp
 
     # --- Admin: invite codes (Phase 3 closed signup) -------------------------
 
