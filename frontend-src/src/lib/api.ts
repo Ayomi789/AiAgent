@@ -23,8 +23,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (res.status === 401) {
-    // Session expired (or server slept and lost it) — Flask login handles it.
-    window.location.href = "/login";
+    // Session expired (or server slept and lost it) — console sign-in handles it.
+    window.location.href = "/console/login";
     throw new ApiError(401, "Session expired — signing in again.");
   }
   let body: unknown = null;
@@ -223,10 +223,17 @@ export const api = {
       skip_llm,
       authorized,
     }),
-  logout: () =>
-    fetch("/logout", { method: "POST", credentials: "include" }).then(() => {
-      window.location.href = "/login";
-    }),
+  logout: async () => {
+    // Flask's logout is a CSRF-guarded form POST — fetch the session token first.
+    const { csrf_token } = await get<{ csrf_token: string }>("/api/csrf");
+    await fetch("/logout", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ csrf_token }),
+    });
+    window.location.href = "/login";
+  },
 };
 
 export function downloadUrl(stamp: string, fmt: string): string {
