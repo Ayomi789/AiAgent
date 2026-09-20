@@ -48,48 +48,60 @@ _LOGIN_PAGE = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sentinel - Sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ font-family: "Segoe UI", system-ui, sans-serif; background: #07080b; color: #e8edf4;
-         min-height: 100vh; display: grid; place-items: center; padding: 20px; }}
-  .card {{ width: 100%; max-width: 380px; background: #10131a; border: 1px solid rgba(232,237,244,0.1);
-          border-radius: 14px; padding: 28px; box-shadow: 0 24px 60px -28px rgba(0,0,0,0.72); }}
+  :focus-visible {{ outline: 2px solid #4c8dff; outline-offset: 1px; }}
+  ::selection {{ background: #234066; color: #e8ebee; }}
+  @media (prefers-reduced-motion: reduce) {{
+    *, *::before, *::after {{ animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }}
+  }}
+  body {{ font-family: "Inter", "Segoe UI", system-ui, sans-serif; background: #0b0d10; color: #e8ebee;
+         min-height: 100vh; display: grid; place-items: center; padding: 20px;
+         -webkit-font-smoothing: antialiased; }}
+  .card {{ width: 100%; max-width: 380px; background: #121417; border: 1px solid #22262c;
+          border-radius: 6px; padding: 28px; box-shadow: 0 24px 60px -28px rgba(0,0,0,0.72); }}
   .brand {{ display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }}
-  .mark {{ width: 34px; height: 34px; border-radius: 9px; background: #0e1218;
-          border: 1px solid rgba(46,230,166,0.28); display: grid; place-items: center; }}
+  .mark {{ width: 34px; height: 34px; border-radius: 6px; background: #16191d;
+          border: 1px solid #2c3138; display: grid; place-items: center; }}
   h1 {{ font-size: 17px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 650; }}
-  .sub {{ color: #8b93a7; font-size: 12.5px; margin: 10px 0 20px; line-height: 1.5; }}
+  .sub {{ color: #98a1ab; font-size: 12.5px; margin: 10px 0 20px; line-height: 1.5; }}
   label {{ display: block; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
-          color: #5a6276; font-weight: 600; margin: 12px 0 6px; }}
-  input[type=email], input[type=password] {{ width: 100%; height: 38px; background: #161b24;
-          border: 1px solid rgba(232,237,244,0.12); border-radius: 8px; color: #e8edf4;
-          padding: 0 12px; font-size: 14px; }}
-  input:focus {{ outline: 1px solid rgba(46,230,166,0.4); border-color: rgba(46,230,166,0.35); }}
-  button {{ width: 100%; height: 40px; margin-top: 18px; border-radius: 8px; cursor: pointer;
-           border: 1px solid rgba(46,230,166,0.35); color: #2ee6a6; font-weight: 700;
-           background: linear-gradient(180deg, rgba(46,230,166,0.16), rgba(46,230,166,0.08));
-           font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
-           font-family: inherit; }}
-  button:hover {{ background: rgba(46,230,166,0.22); }}
-  .alt {{ text-align: center; margin-top: 16px; font-size: 12.5px; color: #8b93a7; }}
-  .alt a {{ color: #2ee6a6; text-decoration: none; }}
-  .flash {{ background: rgba(255,59,92,0.1); border: 1px solid rgba(255,59,92,0.35); color: #ff3b5c;
-           border-radius: 8px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 6px; }}
-  .flash-ok {{ background: rgba(46,230,166,0.08); border: 1px solid rgba(46,230,166,0.35); color: #2ee6a6; }}
-  .tokenline {{ margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(232,237,244,0.08);
-               font-size: 12px; color: #8b93a7; text-align: center; }}
+          color: #6b747e; font-weight: 600; margin: 12px 0 6px; }}
+  input[type=email], input[type=password], input[type=text] {{ width: 100%; height: 38px; background: #0b0d10;
+          border: 1px solid #2c3138; border-radius: 5px; color: #e8ebee;
+          padding: 0 12px; font-size: 14px; font-family: inherit; }}
+  input:hover {{ border-color: #3a414a; }}
+  input:focus {{ outline: none; border-color: #4c8dff; background: #0e1013; }}
+  input::placeholder {{ color: #4d555e; }}
+  button {{ width: 100%; height: 40px; margin-top: 18px; border-radius: 5px; cursor: pointer;
+           border: 1px solid #e8ebee; color: #0b0d10; font-weight: 600;
+           background: #e8ebee; font-size: 12.5px; letter-spacing: 0.01em;
+           font-family: inherit; transition: background-color 120ms ease; }}
+  button:hover {{ background: #ffffff; border-color: #ffffff; }}
+  .alt {{ text-align: center; margin-top: 16px; font-size: 12.5px; color: #98a1ab; }}
+  .alt a {{ color: #7fa9f0; text-decoration: none; }}
+  .alt a:hover {{ text-decoration: underline; }}
+  .flash {{ background: rgba(229,72,77,0.12); border: 1px solid rgba(229,72,77,0.34); color: #f28286;
+           border-radius: 5px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 6px; }}
+  .flash-ok {{ background: rgba(70,167,88,0.11); border: 1px solid rgba(70,167,88,0.3); color: #66c07a; }}
+  .tokenline {{ margin-top: 18px; padding-top: 14px; border-top: 1px solid #22262c;
+               font-size: 12px; color: #98a1ab; text-align: center; }}
   label.consent {{ display: flex; gap: 8px; align-items: flex-start; font-size: 12px;
-                  color: #8b93a7; margin-top: 14px; text-transform: none; letter-spacing: 0;
+                  color: #98a1ab; margin-top: 14px; text-transform: none; letter-spacing: 0;
                   font-weight: 400; }}
-  label.consent input {{ margin-top: 2px; }}
-  label.consent a {{ color: #4d9fff; }}
-  .tokenline a {{ color: #4d9fff; text-decoration: none; }}
+  label.consent input {{ margin-top: 2px; accent-color: #4c8dff; }}
+  label.consent a {{ color: #7fa9f0; }}
+  .tokenline a {{ color: #7fa9f0; text-decoration: none; }}
+  .tokenline a:hover {{ text-decoration: underline; }}
 </style>
 </head>
 <body>
   <div class="card">
     <div class="brand">
-      <div class="mark"><svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.2" stroke="#2ee6a6" stroke-opacity="0.35"/><circle cx="10" cy="10" r="4.2" stroke="#2ee6a6" stroke-opacity="0.55"/><path d="M10 4.6V10l4.2 2.3" stroke="#2ee6a6" stroke-width="1.4" stroke-linecap="round"/><circle cx="10" cy="10" r="1.3" fill="#2ee6a6"/></svg></div>
+      <div class="mark"><svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.2" stroke="#4c8dff" stroke-opacity="0.35"/><circle cx="10" cy="10" r="4.2" stroke="#4c8dff" stroke-opacity="0.55"/><path d="M10 4.6V10l4.2 2.3" stroke="#4c8dff" stroke-width="1.4" stroke-linecap="round"/><circle cx="10" cy="10" r="1.3" fill="#4c8dff"/></svg></div>
       <h1>Sentinel</h1>
     </div>
     <p class="sub">{subtitle}</p>
@@ -1575,7 +1587,7 @@ _PAGE = r"""
           if (!csrf) { setRunState("cannot accept terms (no csrf) - reload the page", "err"); return; }
           var fd = new FormData();
           fd.append("csrf_token", csrf.value);
-          var res = await fetch("/terms/accept?next=/", { method: "POST", body: fd });
+          var res = await fetch("/terms/accept?next=/console/app", { method: "POST", body: fd });
           if (res.ok || res.redirected) {
             setRunState("terms accepted - starting scan…");
             var retry = await fetch("/api/scan", {
@@ -2235,6 +2247,22 @@ def create_app(
         # Static assets and favicon don't need auth.
         if request.path == "/favicon.ico" or request.path.startswith("/static/"):
             return None
+        # The React console's auth screens + their bundle must load pre-login.
+        if request.path in ("/console/login", "/console/signup"):
+            return None
+        if request.path.startswith("/console/assets/") or request.path in (
+            "/console/favicon.svg",
+            "/console/vite.svg",
+        ):
+            return None
+        # Public JSON auth endpoints (CSRF token, policy, login, signup).
+        if request.path in (
+            "/api/auth/csrf",
+            "/api/auth/policy",
+            "/api/auth/login",
+            "/api/auth/signup",
+        ):
+            return None
         if request.path.startswith("/api/"):
             return jsonify({"error": "unauthorized"}), 401
         return redirect(url_for("login", next=request.path))
@@ -2245,13 +2273,128 @@ def create_app(
         UI fetches (and plain reloads) authenticate seamlessly."""
         provided = request.args.get("token")
         if provided and secrets.compare_digest(provided, token):
-            resp.set_cookie(_COOKIE, token, **_cookie_kwargs())
+            resp.set_cookie(_COOKIE, token, path="/", **_cookie_kwargs())
         return resp
 
     @app.get("/healthz")
     def healthz():
         """Public liveness probe for the reverse proxy and uptime monitors."""
         return jsonify({"ok": True})
+
+    @app.get("/api/me")
+    def api_me():
+        """Who is viewing: own email + admin flag (drives the console header)."""
+        u = _user()
+        if u is None:
+            return jsonify({"email": None, "admin": True})  # bootstrap-token caller
+        return jsonify({"email": u["email"], "admin": u["role"] == "admin"})
+
+    @app.get("/api/csrf")
+    def api_csrf():
+        """Session CSRF token for console mutations (logout, invites)."""
+        return jsonify({"csrf_token": csrf_token()})
+
+    # --- JSON auth (React console login/signup) -------------------------------
+    # Same rules as the form handlers below, JSON in/out. CSRF still enforced:
+    # anonymous callers fetch a session-bound token from /api/auth/csrf first.
+
+    @app.get("/api/auth/csrf")
+    def api_auth_csrf():
+        return jsonify({"csrf_token": csrf_token()})
+
+    @app.get("/api/auth/policy")
+    def api_auth_policy():
+        return jsonify({"policy": signup_policy(users.count())})
+
+    def _auth_body() -> dict:
+        body = request.get_json(silent=True)
+        return body if isinstance(body, dict) else {}
+
+    @app.post("/api/auth/login")
+    def api_auth_login():
+        body = _auth_body()
+        ip = _client_ip()
+        if not limiter.check(f"login:{ip}"):
+            return jsonify({"error": "Too many attempts - wait 5 minutes and try again."}), 429
+        if not csrf_valid(body):
+            return jsonify({"error": "Invalid or expired form - try again."}), 400
+        row = users.verify(str(body.get("email", "")), str(body.get("password", "")))
+        if row is None:
+            limiter.hit(f"login:{ip}")
+            return jsonify({"error": "Wrong email or password."}), 401
+        limiter.reset(f"login:{ip}")
+        login_user(int(row["id"]))
+        return jsonify({"ok": True, "redirect": "/console/app"})
+
+    @app.post("/api/auth/signup")
+    def api_auth_signup():
+        body = _auth_body()
+        ip = _client_ip()
+        if not limiter.check(f"signup:{ip}"):
+            return jsonify({"error": "Too many attempts - wait 5 minutes and try again."}), 429
+        if not csrf_valid(body):
+            return jsonify({"error": "Invalid or expired form - try again."}), 400
+        first = users.count() == 0
+        policy = signup_policy(users.count())
+        if policy == "bootstrap":
+            if not secrets.compare_digest(str(body.get("bootstrap_token", "")), token):
+                limiter.hit(f"signup:{ip}")
+                return jsonify(
+                    {"error": "Access token missing or wrong - the first account is reserved for the server operator."}
+                ), 403
+        elif policy == "invite":
+            if not users.use_invite(str(body.get("invite_code", ""))):
+                limiter.hit(f"signup:{ip}")
+                return jsonify(
+                    {"error": "That invite code is not valid (or already used) - ask an admin for a fresh one."}
+                ), 403
+        if not body.get("accept_terms"):
+            return jsonify({"error": "You must accept the Terms of Service to create an account."}), 400
+        try:
+            uid = users.create_user(
+                str(body.get("email", "")), str(body.get("password", "")), role="admin" if first else "user"
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if uid is None:
+            return jsonify({"error": "That email is already registered - sign in instead."}), 409
+        limiter.reset(f"signup:{ip}")
+        from qaagent.terms import TERMS_VERSION
+
+        users.accept_terms(uid, TERMS_VERSION, ip=ip)
+        login_user(uid)
+        return jsonify({"ok": True, "redirect": "/console/app"})
+
+    _UI_DIR = Path(__file__).resolve().parent / "ui"
+
+    def _home() -> str:
+        """Where signed-in users land: the React console when its bundle is
+        installed, otherwise the classic dashboard."""
+        if _UI_DIR.is_dir() and (_UI_DIR / "index.html").exists():
+            return "/console/app"
+        return "/"
+
+    @app.get("/console")
+    @app.get("/console/", defaults={"subpath": ""})
+    @app.get("/console/<path:subpath>")
+    def console(subpath: str = ""):
+        """Serve the React console (same origin, so session cookies just work).
+
+        Anonymous visitors fall through to the auth gate's login redirect;
+        only the built bundle's files are served, everything else is the
+        SPA fallback (index.html) so client-side routes resolve.
+        """
+        if not _UI_DIR.is_dir():
+            return jsonify({"error": "console not installed in this build"}), 404
+        if subpath:
+            candidate = (_UI_DIR / subpath).resolve()
+            try:
+                candidate.relative_to(_UI_DIR.resolve())
+            except ValueError:
+                return jsonify({"error": "not found"}), 404
+            if candidate.is_file():
+                return send_file(candidate)
+        return send_file(_UI_DIR / "index.html")
 
     # --- Public legal pages (Phase 3) -----------------------------------------
 
@@ -2348,7 +2491,7 @@ def create_app(
     @app.get("/login")
     def login():
         if _user() is not None:
-            return redirect("/")
+            return redirect(_home())
         if request.args.get("out") == "1":
             return _auth_page(
                 "login", "Sign in to run scans and view reports.",
@@ -2374,15 +2517,15 @@ def create_app(
             return _auth_page("login", "Sign in to run scans and view reports.", "Wrong email or password.")
         limiter.reset(f"login:{ip}")
         login_user(int(row["id"]))  # suspended accounts never verify (store-level)
-        dest = request.args.get("next") or "/"
+        dest = request.args.get("next") or _home()
         if not dest.startswith("/"):  # open-redirect guard
-            dest = "/"
+            dest = _home()
         return redirect(dest)
 
     @app.get("/signup")
     def signup():
         if _user() is not None:
-            return redirect("/")
+            return redirect(_home())
         policy = signup_policy(users.count())
         if policy == "bootstrap":
             subtitle = (
@@ -2461,15 +2604,15 @@ def create_app(
 
         users.accept_terms(uid, TERMS_VERSION, ip=ip)
         login_user(uid)
-        return redirect("/")
+        return redirect(_home())
 
     @app.get("/token-login")
     def token_login_page():
         """Local users arrive via the tokened URL - explain and honor it."""
         provided = request.args.get("token", "")
         if provided and secrets.compare_digest(provided, token):
-            resp = redirect("/")
-            resp.set_cookie(_COOKIE, provided, **_cookie_kwargs())
+            resp = redirect(_home())
+            resp.set_cookie(_COOKIE, provided, path="/", **_cookie_kwargs())
             return resp
         return _auth_page(
             "login",
@@ -2480,9 +2623,17 @@ def create_app(
     @app.post("/logout")
     def logout():
         if not csrf_valid(request.form):
-            return redirect("/")
+            return redirect(_home())
         logout_user()
-        return redirect("/login?out=1")
+        resp = redirect("/login?out=1")
+        # Token-cookie holders (token-login URL) have no session to clear -
+        # without this the cookie re-authenticates them on the next request
+        # and logout appears to do nothing. Both paths: current cookies are
+        # scoped site-wide, legacy ones may be scoped to /console/.
+        resp.delete_cookie(_COOKIE, path="/")
+        resp.delete_cookie(_COOKIE, path="/console/")
+        resp.delete_cookie(_COOKIE, path="/console")
+        return resp
 
     # --- Admin: invite codes (Phase 3 closed signup) -------------------------
 
@@ -2513,7 +2664,7 @@ def create_app(
     def invites_page():
         u = _user()
         if u is None or u["role"] != "admin":
-            return redirect("/")
+            return redirect(_home())
         return _INVITES_PAGE.replace("{rows}", _invite_rows()).replace(
             "{csrf}", csrf_token()
         )
@@ -2587,10 +2738,10 @@ def create_app(
                 or request.cookies.get(_COOKIE)
             )
             if not (provided and secrets.compare_digest(provided, token)):
-                return redirect("/")
+                return redirect(_home())
             token_caller = True
         elif u["role"] != "admin":
-            return redirect("/")
+            return redirect(_home())
         viewer_id = -1 if token_caller else int(u["id"])  # no "that is you" row
         import html as _html
 
@@ -2657,9 +2808,9 @@ def create_app(
         from qaagent.terms import TERMS_VERSION
 
         users.accept_terms(int(u["id"]), TERMS_VERSION, ip=_client_ip())
-        dest = request.args.get("next") or "/"
+        dest = request.args.get("next") or _home()
         if not dest.startswith("/"):  # open-redirect guard
-            dest = "/"
+            dest = _home()
         return redirect(dest)
 
     @app.get("/")

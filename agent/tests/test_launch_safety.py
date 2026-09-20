@@ -166,13 +166,13 @@ def test_first_signup_requires_bootstrap_token(tmp_path, monkeypatch):
     })
     assert "reserved for the server operator" in bad.get_data(as_text=True)
 
-    # Correct token -> admin account created.
+    # Correct token -> admin account created, landing in the console.
     csrf = _csrf(client, "/signup")
     ok = client.post("/signup", data={
         "email": "owner@example.com", "password": "supersecret9",
         "csrf_token": csrf, "bootstrap_token": "tok", "accept_terms": "1",
     }, follow_redirects=True)
-    assert "Run scan" in ok.get_data(as_text=True)
+    assert "Sentinel Console" in ok.get_data(as_text=True)
 
 
 def test_later_signup_requires_invite_code(tmp_path, monkeypatch):
