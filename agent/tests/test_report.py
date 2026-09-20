@@ -220,11 +220,11 @@ def test_dashboard_account_flow(tmp_path):
         follow_redirects=True,
     )
     body = resp.get_data(as_text=True)
-    assert "Run scan" in body and "owner@example.com" in body
+    assert "Sentinel Console" in body
+    assert client.get("/api/me").get_json()["email"] == "owner@example.com"
 
     # Logout (CSRF-protected POST), then the dashboard redirects to login again.
-    logout_page = client.get("/").get_data(as_text=True)
-    csrf2 = re.search(r'name="csrf_token" value="([^"]+)"', logout_page).group(1)
+    csrf2 = client.get("/api/csrf").get_json()["csrf_token"]
     client.post("/logout", data={"csrf_token": csrf2})
     assert client.get("/api/state").status_code == 401
 
@@ -236,7 +236,7 @@ def test_dashboard_account_flow(tmp_path):
         data={"email": "owner@example.com", "password": "supersecret9", "csrf_token": csrf3},
         follow_redirects=True,
     )
-    assert "Run scan" in resp.get_data(as_text=True)
+    assert "Sentinel Console" in resp.get_data(as_text=True)
 
     # Wrong password is rejected (and counts toward rate limiting).
     client2 = app.test_client()

@@ -2247,6 +2247,22 @@ def create_app(
         # Static assets and favicon don't need auth.
         if request.path == "/favicon.ico" or request.path.startswith("/static/"):
             return None
+        # The React console's auth screens + their bundle must load pre-login.
+        if request.path in ("/console/login", "/console/signup"):
+            return None
+        if request.path.startswith("/console/assets/") or request.path in (
+            "/console/favicon.svg",
+            "/console/vite.svg",
+        ):
+            return None
+        # Public JSON auth endpoints (CSRF token, policy, login, signup).
+        if request.path in (
+            "/api/auth/csrf",
+            "/api/auth/policy",
+            "/api/auth/login",
+            "/api/auth/signup",
+        ):
+            return None
         if request.path.startswith("/api/"):
             return jsonify({"error": "unauthorized"}), 401
         return redirect(url_for("login", next=request.path))
@@ -2271,12 +2287,83 @@ def create_app(
         u = _user()
         if u is None:
             return jsonify({"email": None, "admin": True})  # bootstrap-token caller
-        return jsonify({"email": u.get("email"), "admin": u.get("role") == "admin"})
+        return jsonify({"email": u["email"], "admin": u["role"] == "admin"})
 
     @app.get("/api/csrf")
     def api_csrf():
         """Session CSRF token for console mutations (logout, invites)."""
         return jsonify({"csrf_token": csrf_token()})
+
+    # --- JSON auth (React console login/signup) -------------------------------
+    # Same rules as the form handlers below, JSON in/out. CSRF still enforced:
+    # anonymous callers fetch a session-bound token from /api/auth/csrf first.
+
+    @app.get("/api/auth/csrf")
+    def api_auth_csrf():
+        return jsonify({"csrf_token": csrf_token()})
+
+    @app.get("/api/auth/policy")
+    def api_auth_policy():
+        return jsonify({"policy": signup_policy(users.count())})
+
+    def _auth_body() -> dict:
+        body = request.get_json(silent=True)
+        return body if isinstance(body, dict) else {}
+
+    @app.post("/api/auth/login")
+    def api_auth_login():
+        body = _auth_body()
+        ip = _client_ip()
+        if not limiter.check(f"login:{ip}"):
+            return jsonify({"error": "Too many attempts - wait 5 minutes and try again."}), 429
+        if not csrf_valid(body):
+            return jsonify({"error": "Invalid or expired form - try again."}), 400
+        row = users.verify(str(body.get("email", "")), str(body.get("password", "")))
+        if row is None:
+            limiter.hit(f"login:{ip}")
+            return jsonify({"error": "Wrong email or password."}), 401
+        limiter.reset(f"login:{ip}")
+        login_user(int(row["id"]))
+        return jsonify({"ok": True, "redirect": "/console/app"})
+
+    @app.post("/api/auth/signup")
+    def api_auth_signup():
+        body = _auth_body()
+        ip = _client_ip()
+        if not limiter.check(f"signup:{ip}"):
+            return jsonify({"error": "Too many attempts - wait 5 minutes and try again."}), 429
+        if not csrf_valid(body):
+            return jsonify({"error": "Invalid or expired form - try again."}), 400
+        first = users.count() == 0
+        policy = signup_policy(users.count())
+        if policy == "bootstrap":
+            if not secrets.compare_digest(str(body.get("bootstrap_token", "")), token):
+                limiter.hit(f"signup:{ip}")
+                return jsonify(
+                    {"error": "Access token missing or wrong - the first account is reserved for the server operator."}
+                ), 403
+        elif policy == "invite":
+            if not users.use_invite(str(body.get("invite_code", ""))):
+                limiter.hit(f"signup:{ip}")
+                return jsonify(
+                    {"error": "That invite code is not valid (or already used) - ask an admin for a fresh one."}
+                ), 403
+        if not body.get("accept_terms"):
+            return jsonify({"error": "You must accept the Terms of Service to create an account."}), 400
+        try:
+            uid = users.create_user(
+                str(body.get("email", "")), str(body.get("password", "")), role="admin" if first else "user"
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if uid is None:
+            return jsonify({"error": "That email is already registered - sign in instead."}), 409
+        limiter.reset(f"signup:{ip}")
+        from qaagent.terms import TERMS_VERSION
+
+        users.accept_terms(uid, TERMS_VERSION, ip=ip)
+        login_user(uid)
+        return jsonify({"ok": True, "redirect": "/console/app"})
 
     _UI_DIR = Path(__file__).resolve().parent / "ui"
 
@@ -2525,7 +2612,7 @@ def create_app(
         provided = request.args.get("token", "")
         if provided and secrets.compare_digest(provided, token):
             resp = redirect(_home())
-            resp.set_cookie(_COOKIE, provided, **_cookie_kwargs())
+            resp.set_cookie(_COOKIE, provided, path="/", **_cookie_kwargs())
             return resp
         return _auth_page(
             "login",

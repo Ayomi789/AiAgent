@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-route
 import { useEffect } from "react";
 import { AppShell } from "./components/AppShell";
 import { Landing } from "./pages/Landing";
+import { Login } from "./pages/Login";
+import { Signup } from "./pages/Signup";
 import { Overview } from "./pages/Overview";
 import { Runs } from "./pages/Runs";
 import { NewRun } from "./pages/NewRun";
@@ -27,6 +29,8 @@ function AppRoutes() {
       <ScrollToTop />
       <Routes>
         <Route path="/" element={<Landing />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
         <Route
           path="/app"
           element={

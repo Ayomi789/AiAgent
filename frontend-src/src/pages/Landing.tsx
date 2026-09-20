@@ -60,9 +60,9 @@ export function Landing() {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
-            <a href="/login" className="font-mono text-[10.5px] text-muted hover:text-ink">
+            <Link to="/login" className="font-mono text-[10.5px] text-muted hover:text-ink">
               Sign in
-            </a>
+            </Link>
             <a href="#reporting" className="btn-secondary !py-[6px] !text-[11px]">
               View sample report
             </a>
