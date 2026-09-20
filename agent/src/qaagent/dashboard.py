@@ -1575,7 +1575,7 @@ _PAGE = r"""
           if (!csrf) { setRunState("cannot accept terms (no csrf) - reload the page", "err"); return; }
           var fd = new FormData();
           fd.append("csrf_token", csrf.value);
-          var res = await fetch("/terms/accept?next=/", { method: "POST", body: fd });
+          var res = await fetch("/terms/accept?next=/console/app", { method: "POST", body: fd });
           if (res.ok || res.redirected) {
             setRunState("terms accepted - starting scan…");
             var retry = await fetch("/api/scan", {
@@ -2263,6 +2263,13 @@ def create_app(
 
     _UI_DIR = Path(__file__).resolve().parent / "ui"
 
+    def _home() -> str:
+        """Where signed-in users land: the React console when its bundle is
+        installed, otherwise the classic dashboard."""
+        if _UI_DIR.is_dir() and (_UI_DIR / "index.html").exists():
+            return "/console/app"
+        return "/"
+
     @app.get("/console")
     @app.get("/console/", defaults={"subpath": ""})
     @app.get("/console/<path:subpath>")
@@ -2380,7 +2387,7 @@ def create_app(
     @app.get("/login")
     def login():
         if _user() is not None:
-            return redirect("/")
+            return redirect(_home())
         if request.args.get("out") == "1":
             return _auth_page(
                 "login", "Sign in to run scans and view reports.",
@@ -2406,15 +2413,15 @@ def create_app(
             return _auth_page("login", "Sign in to run scans and view reports.", "Wrong email or password.")
         limiter.reset(f"login:{ip}")
         login_user(int(row["id"]))  # suspended accounts never verify (store-level)
-        dest = request.args.get("next") or "/"
+        dest = request.args.get("next") or _home()
         if not dest.startswith("/"):  # open-redirect guard
-            dest = "/"
+            dest = _home()
         return redirect(dest)
 
     @app.get("/signup")
     def signup():
         if _user() is not None:
-            return redirect("/")
+            return redirect(_home())
         policy = signup_policy(users.count())
         if policy == "bootstrap":
             subtitle = (
@@ -2493,14 +2500,14 @@ def create_app(
 
         users.accept_terms(uid, TERMS_VERSION, ip=ip)
         login_user(uid)
-        return redirect("/")
+        return redirect(_home())
 
     @app.get("/token-login")
     def token_login_page():
         """Local users arrive via the tokened URL - explain and honor it."""
         provided = request.args.get("token", "")
         if provided and secrets.compare_digest(provided, token):
-            resp = redirect("/")
+            resp = redirect(_home())
             resp.set_cookie(_COOKIE, provided, **_cookie_kwargs())
             return resp
         return _auth_page(
@@ -2512,7 +2519,7 @@ def create_app(
     @app.post("/logout")
     def logout():
         if not csrf_valid(request.form):
-            return redirect("/")
+            return redirect(_home())
         logout_user()
         return redirect("/login?out=1")
 
@@ -2545,7 +2552,7 @@ def create_app(
     def invites_page():
         u = _user()
         if u is None or u["role"] != "admin":
-            return redirect("/")
+            return redirect(_home())
         return _INVITES_PAGE.replace("{rows}", _invite_rows()).replace(
             "{csrf}", csrf_token()
         )
@@ -2619,10 +2626,10 @@ def create_app(
                 or request.cookies.get(_COOKIE)
             )
             if not (provided and secrets.compare_digest(provided, token)):
-                return redirect("/")
+                return redirect(_home())
             token_caller = True
         elif u["role"] != "admin":
-            return redirect("/")
+            return redirect(_home())
         viewer_id = -1 if token_caller else int(u["id"])  # no "that is you" row
         import html as _html
 
@@ -2689,9 +2696,9 @@ def create_app(
         from qaagent.terms import TERMS_VERSION
 
         users.accept_terms(int(u["id"]), TERMS_VERSION, ip=_client_ip())
-        dest = request.args.get("next") or "/"
+        dest = request.args.get("next") or _home()
         if not dest.startswith("/"):  # open-redirect guard
-            dest = "/"
+            dest = _home()
         return redirect(dest)
 
     @app.get("/")
