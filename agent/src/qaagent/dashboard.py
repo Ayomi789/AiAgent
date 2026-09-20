@@ -50,7 +50,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
 <title>Sentinel - Sign in</title>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ font-family: "Inter", "Segoe UI", system-ui, sans-serif; background: #07080b; color: #e8edf4;
+  body {{ font-family: "Segoe UI", system-ui, sans-serif; background: #07080b; color: #e8edf4;
          min-height: 100vh; display: grid; place-items: center; padding: 20px; }}
   .card {{ width: 100%; max-width: 380px; background: #10131a; border: 1px solid rgba(232,237,244,0.1);
           border-radius: 14px; padding: 28px; box-shadow: 0 24px 60px -28px rgba(0,0,0,0.72); }}
@@ -137,7 +137,7 @@ _LEGAL_PAGE = r"""<!DOCTYPE html>
 <title>Sentinel - {title}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: "Inter", "Segoe UI", system-ui, sans-serif; background: #07080b; color: #e8edf4;
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: #07080b; color: #e8edf4;
          min-height: 100vh; padding: 36px 20px; line-height: 1.65; }
   .wrap { max-width: 720px; margin: 0 auto; }
   h1 { font-size: 17px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 650;
@@ -168,7 +168,7 @@ _ADMIN_PAGE = r"""<!DOCTYPE html>
 <title>Sentinel - Admin</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: "Inter", "Segoe UI", system-ui, sans-serif; background: #07080b; color: #e8edf4;
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: #07080b; color: #e8edf4;
          min-height: 100vh; padding: 32px 20px; }
   .wrap { max-width: 860px; margin: 0 auto; }
   h1 { font-size: 17px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 650; }
@@ -242,7 +242,7 @@ _INVITES_PAGE = r"""<!DOCTYPE html>
 <title>Sentinel - Invites</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: "Inter", "Segoe UI", system-ui, sans-serif; background: #07080b; color: #e8edf4;
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: #07080b; color: #e8edf4;
          min-height: 100vh; padding: 32px 20px; }
   .wrap { max-width: 760px; margin: 0 auto; }
   h1 { font-size: 17px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 650; }
@@ -293,9 +293,6 @@ _PAGE = r"""
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sentinel - Live QA</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
   <link rel='icon' type='image/svg+xml' href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.2" stroke="%232ee6a6" stroke-opacity="0.35"/><circle cx="10" cy="10" r="4.2" stroke="%232ee6a6" stroke-opacity="0.55"/><path d="M10 4.6V10l4.2 2.3" stroke="%232ee6a6" stroke-width="1.4" stroke-linecap="round"/><circle cx="10" cy="10" r="1.3" fill="%232ee6a6"/></svg>' />
   <style>
     :root {
@@ -311,29 +308,18 @@ _PAGE = r"""
       --faint: #5a6276;
       --mint: #2ee6a6;
       --mint-2: #1bbf88;
-      --crit: #e5484d;
-      --high: #f76b15;
-      --med: #f5a623;
-      --low: #6c8fb3;
-      --info: #7d8794;
-      --link: #4d9fff;
+      --crit: #ff3b5c;
+      --high: #ff7a2f;
+      --med: #e8b84a;
+      --low: #4d9fff;
+      --info: #8b93a7;
       --ok: #2ee6a6;
       --fixed: #6ea8ff;
       --shadow: 0 24px 60px -28px rgba(0, 0, 0, 0.72);
       --radius: 12px;
-      --font: "Inter", "Segoe UI", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
-      --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Mono", "Consolas", "Liberation Mono", ui-monospace, monospace;
+      --font: "Segoe UI", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
+      --mono: "SFMono-Regular", "Cascadia Mono", "Consolas", "Liberation Mono", ui-monospace, monospace;
       --stripe: #2ee6a6;
-    }
-
-    :focus-visible { outline: 2px solid #4c8dff; outline-offset: 1px; }
-    ::selection { background: #234066; color: #e8ebee; }
-    * { scrollbar-width: thin; scrollbar-color: #2c3138 transparent; }
-    *::-webkit-scrollbar { width: 10px; height: 10px; }
-    *::-webkit-scrollbar-track { background: transparent; }
-    *::-webkit-scrollbar-thumb { background: #272c33; border-radius: 6px; }
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
     }
 
     * { box-sizing: border-box; }
@@ -512,9 +498,9 @@ _PAGE = r"""
       background: rgba(46,230,166,0.08);
     }
     #status[data-state="completed"] {
-      color: var(--ok);
-      border-color: rgba(46,230,166,0.3);
-      background: rgba(46,230,166,0.08);
+      color: var(--low);
+      border-color: rgba(77,159,255,0.3);
+      background: rgba(77,159,255,0.08);
     }
     #status[data-state="error"] {
       color: var(--crit);
@@ -993,12 +979,8 @@ _PAGE = r"""
 
     .sev-badge {
       flex: 0 0 auto;
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
       font-family: var(--mono);
       font-size: 9px;
-      font-weight: 600;
       letter-spacing: 0.12em;
       text-transform: uppercase;
       padding: 3px 6px;
@@ -1008,20 +990,12 @@ _PAGE = r"""
       border: 1px solid color-mix(in srgb, var(--sev) 28%, transparent);
     }
 
-    .sev-badge .sev-dot {
-      width: 5px;
-      height: 5px;
-      border-radius: 2px;
-      background: var(--sev);
-      flex: 0 0 auto;
-    }
-
     .url {
       display: block;
       margin: 7px 0 0 24px;
       font-family: var(--mono);
       font-size: 11.5px;
-      color: var(--link);
+      color: var(--low);
       word-break: break-all;
       text-decoration: none;
     }
@@ -1250,11 +1224,11 @@ _PAGE = r"""
       font-family: var(--mono); padding: 1.5px 7px; border-radius: 999px;
       border: 1px solid; line-height: 1.5;
     }
-    .hist-row .sev-badge.crit { --sev: var(--crit); color: var(--crit); border-color: rgba(229,72,77,0.45); background: rgba(229,72,77,0.09); }
-    .hist-row .sev-badge.high { --sev: var(--high); color: var(--high); border-color: rgba(247,107,21,0.45); background: rgba(247,107,21,0.09); }
-    .hist-row .sev-badge.med  { --sev: var(--med); color: var(--med);  border-color: rgba(245,166,35,0.4);  background: rgba(245,166,35,0.08); }
-    .hist-row .sev-badge.low  { --sev: var(--low); color: var(--low);  border-color: rgba(108,143,179,0.4);  background: rgba(108,143,179,0.08); }
-    .hist-row .sev-badge.info { --sev: var(--info); color: var(--info); border-color: var(--line-2);      background: transparent; }
+    .hist-row .sev-badge.crit { color: var(--crit); border-color: rgba(255,59,92,0.45); background: rgba(255,59,92,0.09); }
+    .hist-row .sev-badge.high { color: var(--high); border-color: rgba(255,122,47,0.45); background: rgba(255,122,47,0.09); }
+    .hist-row .sev-badge.med  { color: var(--med);  border-color: rgba(232,184,74,0.4);  background: rgba(232,184,74,0.08); }
+    .hist-row .sev-badge.low  { color: var(--low);  border-color: rgba(77,159,255,0.4);  background: rgba(77,159,255,0.08); }
+    .hist-row .sev-badge.info { color: var(--info); border-color: var(--line-2);      background: transparent; }
     /* Worst-severity edge marker: a 3px stripe on the row's left. */
     .hist-row::before {
       content: ""; position: absolute; left: -18px; top: 15%; bottom: 15%;
@@ -1847,7 +1821,7 @@ _PAGE = r"""
             '<div class="card-top">' +
               glyph(sev) +
               "<h3>" + esc(f.title || "Untitled finding") + "</h3>" +
-              '<span class="sev-badge"><span class="sev-dot"></span>' + esc(SEV_LABEL[sev]) + "</span>" +
+              '<span class="sev-badge">' + esc(SEV_LABEL[sev]) + "</span>" +
             "</div>" +
             (href ? '<a class="url" href="' + href + '" target="_blank" rel="noopener">' + href + "</a>" : "") +
             '<div class="meta-line">' +
@@ -1926,7 +1900,7 @@ _PAGE = r"""
           '<div class="diff-item">' +
             glyph(sev) +
             '<div><div class="t">' + esc(f.title || "Untitled") + '</div><span class="u">' + esc(f.url || "") + "</span></div>" +
-            '<span class="sev-badge" style="--sev: var(--' + (sev === "medium" ? "med" : sev === "info" ? "info" : sev) + ')"><span class="sev-dot"></span>' + esc(SEV_SHORT[sev] || sev) + "</span>" +
+            '<span class="sev-badge" style="--sev: var(--' + (sev === "medium" ? "med" : sev === "info" ? "info" : sev) + ')">' + esc(SEV_SHORT[sev] || sev) + "</span>" +
           "</div>"
         );
       }
@@ -2042,7 +2016,7 @@ _PAGE = r"""
           var sev = SEV_RANK[i];
           var n = counts[sev] || 0;
           if (n > 0) {
-            badges += '<span class="sev-badge ' + SEV_SHORT[sev] + '"><span class="sev-dot"></span>' + sev + ' ' + n + '</span>';
+            badges += '<span class="sev-badge ' + SEV_SHORT[sev] + '">' + sev + ' ' + n + '</span>';
           }
         }
         return badges || '<span class="sev-badge info">clean</span>';
