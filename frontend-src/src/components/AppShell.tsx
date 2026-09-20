@@ -15,7 +15,6 @@ import {
   Menu,
   X,
   Search,
-  Bell,
   Plus,
   Cpu,
   LogOut,
@@ -23,6 +22,7 @@ import {
 
 import { useLiveState } from "../lib/useLive";
 import { api } from "../lib/api";
+import { NotificationBell } from "./Notifications";
 
 interface NavItem {
   to: string;
@@ -176,10 +176,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </span>
               </div>
 
-              <button className="btn-icon relative" aria-label="Notifications">
-                <Bell size={14} />
-                <span className="absolute right-[5px] top-[5px] h-[5px] w-[5px] rounded-full bg-[#e5484d]" />
-              </button>
+              <NotificationBell />
 
               <NavLink to="/app/runs/new" className="btn-primary !py-[6px] !text-[11px]">
                 <Plus size={12} />
