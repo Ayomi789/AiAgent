@@ -69,8 +69,11 @@ def test_legal_pages_linked_from_dashboard_and_signup(legal_app):
     app, _ = legal_app
     client = app.test_client()
     _signup(client, "owner@example.com", bootstrap_token="tok")
-    dash = client.get("/").get_data(as_text=True)
-    assert '/abuse' in dash and '/terms' in dash
+    # Site root routes into the console; legal pages stay directly reachable.
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["Location"] == "/console/app"
+    assert client.get("/terms").status_code == 200
+    assert client.get("/abuse").status_code == 200
     signup_html = app.test_client().get("/signup").get_data(as_text=True)
     assert 'href="/terms"' in signup_html and 'name="accept_terms"' in signup_html
 
@@ -144,7 +147,7 @@ def test_scan_gate_blocks_stale_acceptance(legal_app):
     assert data["code"] == "terms_required" and "terms" in data["error"].lower()
 
     # Re-accept through the real endpoint (CSRF + next guard).
-    csrf = _csrf(client, "/")
+    csrf = client.get("/api/csrf").get_json()["csrf_token"]
     r2 = client.post("/terms/accept?next=/", data={"csrf_token": csrf})
     assert r2.status_code == 302
     assert users.terms_accepted_version(1) == TERMS_VERSION

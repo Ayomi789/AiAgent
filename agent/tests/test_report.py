@@ -170,10 +170,10 @@ def test_dashboard_api_requires_token(tmp_path):
     )
     client = app.test_client()
 
-    # No token anywhere -> 401 on API, redirect to /login on the page.
+    # No token anywhere -> 401 on API, console landing on the page.
     assert client.get("/api/state").status_code == 401
     assert client.get("/").status_code == 302
-    assert "/login" in client.get("/").headers.get("Location", "")
+    assert client.get("/").headers.get("Location", "") == "/console/"
     # Wrong token -> 401.
     assert client.get("/api/state?token=wrong").status_code == 401
     # Header token -> 200.
@@ -181,9 +181,10 @@ def test_dashboard_api_requires_token(tmp_path):
         client.get("/api/state", headers={"X-Sentinel-Token": "test-token-123"}).status_code
         == 200
     )
-    # Query token -> 200, and sets the cookie for later plain requests.
+    # Query token -> 302 into the console, and sets the cookie for later plain requests.
     resp = client.get("/?token=test-token-123")
-    assert resp.status_code == 200
+    assert resp.status_code == 302
+    assert resp.headers.get("Location", "") == "/console/"
     assert "sentinel_token" in resp.headers.get("Set-Cookie", "")
     assert client.get("/api/state").status_code == 200  # cookie carried it
 
