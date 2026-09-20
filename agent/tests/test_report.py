@@ -379,7 +379,7 @@ def test_csv_content_type_present(tmp_path):
 
 def test_render_markdown_ranks_by_severity():
     md = render_markdown(_report())
-    assert md.index("[CRITICAL]") < md.index("[LOW]")
+    assert md.index("### critical") < md.index("### low")
     assert "No findings" not in md
 
 
