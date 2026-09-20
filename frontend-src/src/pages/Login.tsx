@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Eye, EyeOff, ArrowRight, ShieldCheck, Lock, AlertTriangle } from "lucide-react";
 import { AuthLayout, AuthAsideHeader } from "../components/AuthLayout";
 
@@ -14,6 +14,10 @@ async function authed(): Promise<boolean> {
 
 export function Login() {
   const navigate = useNavigate();
+  const [search] = useSearchParams();
+  const next = search.get("next");
+  const dest = next && next.startsWith("/") && !next.startsWith("//") ? next : "/app";
+  const signedout = search.get("signedout") === "1";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -23,13 +27,13 @@ export function Login() {
 
   useEffect(() => {
     authed().then((ok) => {
-      if (ok) navigate("/app", { replace: true });
+      if (ok) navigate(dest, { replace: true });
     });
     fetch("/api/auth/csrf", { credentials: "include" })
       .then((r) => r.json())
       .then((d) => setCsrf(d.csrf_token || ""))
       .catch(() => {});
-  }, [navigate]);
+  }, [navigate, dest]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,7 +64,7 @@ export function Login() {
         setLoading(false);
         return;
       }
-      navigate("/app");
+      navigate(dest);
     } catch {
       setError("Could not reach the server — is it awake?");
       setLoading(false);
@@ -130,6 +134,13 @@ export function Login() {
     >
       {/* Form */}
       <form onSubmit={handleSubmit} noValidate>
+        {signedout ? (
+          <div className="mb-4 flex items-start gap-2 rounded-[5px] border border-[rgba(70,167,88,0.3)] bg-[rgba(70,167,88,0.08)] px-3 py-2.5">
+            <span className="text-[9.5px] leading-relaxed text-[#66c07a]">
+              You are signed out. See you next scan.
+            </span>
+          </div>
+        ) : null}
         {error ? (
           <div className="mb-4 flex items-start gap-2 rounded-[5px] border border-[rgba(229,72,77,0.28)] bg-[rgba(229,72,77,0.08)] px-3 py-2.5">
             <AlertTriangle size={11} className="mt-[1px] shrink-0 text-[#f28286]" />

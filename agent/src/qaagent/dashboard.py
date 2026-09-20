@@ -2265,7 +2265,9 @@ def create_app(
             return None
         if request.path.startswith("/api/"):
             return jsonify({"error": "unauthorized"}), 401
-        return redirect(url_for("login", next=request.path))
+        from urllib.parse import quote as _quote
+
+        return redirect(f"/console/login?next={_quote(request.path, safe='')}")
 
     @app.after_request
     def _remember_token(resp):
@@ -2456,7 +2458,7 @@ def create_app(
     def _auth_page(mode: str, subtitle: str, flash: str = "", flash_ok: bool = False, policy: str = ""):
         if mode == "signup":
             action, button = "/signup", "Create account"
-            alt = 'Already registered? <a href="/login">Sign in</a>'
+            alt = 'Already registered? <a href="/console/login">Sign in</a>'
             if policy == "bootstrap":
                 extra_field = (
                     '<label for="bootstrap_token">Access token</label>'
@@ -2473,7 +2475,7 @@ def create_app(
                 extra_field = ""
         else:
             action, button = "/login", "Sign in"
-            alt = 'No account yet? <a href="/signup">Create one</a>'
+            alt = 'No account yet? <a href="/console/signup">Create one</a>'
             extra_field = ""
         flash_cls = "flash flash-ok" if flash_ok and flash else "flash"
         return _LOGIN_PAGE.format(
@@ -2493,10 +2495,7 @@ def create_app(
         if _user() is not None:
             return redirect(_home())
         if request.args.get("out") == "1":
-            return _auth_page(
-                "login", "Sign in to run scans and view reports.",
-                "You are signed out. See you next scan.", flash_ok=True,
-            )
+            return redirect("/console/login?signedout=1")
         return _auth_page("login", "Sign in to run scans and view reports.")
 
     @app.post("/login")
