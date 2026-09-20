@@ -2253,6 +2253,38 @@ def create_app(
         """Public liveness probe for the reverse proxy and uptime monitors."""
         return jsonify({"ok": True})
 
+    @app.get("/api/me")
+    def api_me():
+        """Who is viewing: own email + admin flag (drives the console header)."""
+        u = _user()
+        if u is None:
+            return jsonify({"email": None, "admin": True})  # bootstrap-token caller
+        return jsonify({"email": u.get("email"), "admin": u.get("role") == "admin"})
+
+    _UI_DIR = Path(__file__).resolve().parent / "ui"
+
+    @app.get("/console")
+    @app.get("/console/", defaults={"subpath": ""})
+    @app.get("/console/<path:subpath>")
+    def console(subpath: str = ""):
+        """Serve the React console (same origin, so session cookies just work).
+
+        Anonymous visitors fall through to the auth gate's login redirect;
+        only the built bundle's files are served, everything else is the
+        SPA fallback (index.html) so client-side routes resolve.
+        """
+        if not _UI_DIR.is_dir():
+            return jsonify({"error": "console not installed in this build"}), 404
+        if subpath:
+            candidate = (_UI_DIR / subpath).resolve()
+            try:
+                candidate.relative_to(_UI_DIR.resolve())
+            except ValueError:
+                return jsonify({"error": "not found"}), 404
+            if candidate.is_file():
+                return send_file(candidate)
+        return send_file(_UI_DIR / "index.html")
+
     # --- Public legal pages (Phase 3) -----------------------------------------
 
     @app.get("/terms")
