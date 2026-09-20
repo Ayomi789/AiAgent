@@ -13,6 +13,7 @@ import { Evidence } from "./pages/Evidence";
 import { Targets } from "./pages/Targets";
 import { TestLibrary } from "./pages/TestLibrary";
 import { Reports } from "./pages/Reports";
+import { Admin } from "./pages/Admin";
 import { Settings } from "./pages/Settings";
 
 function ScrollToTop() {
@@ -100,6 +101,14 @@ function AppRoutes() {
           element={
             <AppShell>
               <Reports />
+            </AppShell>
+          }
+        />
+        <Route
+          path="/app/admin"
+          element={
+            <AppShell>
+              <Admin />
             </AppShell>
           }
         />

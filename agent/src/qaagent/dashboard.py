@@ -454,6 +454,93 @@ def create_app(
         """Session CSRF token for console mutations (logout, invites)."""
         return jsonify({"csrf_token": csrf_token()})
 
+    # --- JSON admin (React console admin page) --------------------------------
+    # Same rules as the form handlers: admins and bootstrap-token callers only.
+
+    def _require_admin():
+        if not _viewer_is_admin():
+            return jsonify({"error": "admin only"}), 403
+        return None
+
+    @app.get("/api/admin/overview")
+    def api_admin_overview():
+        denied = _require_admin()
+        if denied:
+            return denied
+        proc = _scan.get("proc")
+        running = proc is not None and proc.poll() is None
+        return jsonify(
+            {
+                "users": [
+                    {
+                        "id": r["id"],
+                        "email": r["email"],
+                        "role": r["role"],
+                        "created_at": r["created_at"],
+                        "suspended": bool(r["suspended"]),
+                        "suspend_reason": r["suspend_reason"],
+                        "suspended_at": r["suspended_at"],
+                    }
+                    for r in users.list_users()
+                ],
+                "invites": [
+                    {
+                        "code": inv["code"],
+                        "created_at": inv["created_at"],
+                        "used": inv["used_by"] is not None,
+                        "used_at": inv["used_at"],
+                    }
+                    for inv in users.list_invites()
+                ],
+                "scan": {
+                    "running": running,
+                    "config": _scan.get("config"),
+                    "started": _scan.get("started"),
+                    "owner_email": _scan.get("owner_email"),
+                    "returncode": _scan.get("returncode")
+                    if not running
+                    else None,
+                },
+            }
+        )
+
+    @app.post("/api/admin/suspend")
+    def api_admin_suspend():
+        denied = _require_admin()
+        if denied:
+            return denied
+        body = request.get_json(silent=True)
+        body = body if isinstance(body, dict) else {}
+        if not csrf_valid(body):
+            return jsonify({"error": "Invalid or expired form - try again."}), 400
+        try:
+            target_id = int(body.get("user_id", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid user id."}), 400
+        u = _user()
+        if u is not None and target_id == int(u["id"]):
+            return jsonify({"error": "You cannot suspend yourself."}), 400
+        suspend = bool(body.get("suspended"))
+        reason = str(body.get("reason", "")).strip()[:200]
+        if suspend:
+            users.set_suspended(target_id, True, reason or "suspended by admin")
+        else:
+            users.set_suspended(target_id, False)
+        return jsonify({"ok": True})
+
+    @app.post("/api/admin/invites")
+    def api_admin_invites():
+        denied = _require_admin()
+        if denied:
+            return denied
+        body = request.get_json(silent=True)
+        body = body if isinstance(body, dict) else {}
+        if not csrf_valid(body):
+            return jsonify({"error": "Invalid or expired form - try again."}), 400
+        u = _user()
+        code = users.create_invite(created_by=int(u["id"]) if u is not None else None)
+        return jsonify({"code": code})
+
     # --- JSON auth (React console login/signup) -------------------------------
     # Same rules as the form handlers below, JSON in/out. CSRF still enforced:
     # anonymous callers fetch a session-bound token from /api/auth/csrf first.

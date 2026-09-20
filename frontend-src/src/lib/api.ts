@@ -120,6 +120,35 @@ export interface MeData {
   admin: boolean;
 }
 
+export interface AdminUser {
+  id: number;
+  email: string;
+  role: string;
+  created_at?: string;
+  suspended: boolean;
+  suspend_reason?: string | null;
+  suspended_at?: string | null;
+}
+
+export interface AdminInvite {
+  code: string;
+  created_at?: string;
+  used: boolean;
+  used_at?: string | null;
+}
+
+export interface AdminOverview {
+  users: AdminUser[];
+  invites: AdminInvite[];
+  scan: {
+    running: boolean;
+    config?: string | null;
+    started?: string | null;
+    owner_email?: string | null;
+    returncode?: number | null;
+  };
+}
+
 export interface ReportFile {
   path: string | null;
   json_path: string | null;
@@ -232,7 +261,21 @@ export const api = {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ csrf_token }),
     });
-    window.location.href = "/login";
+    window.location.href = "/console/login";
+  },
+  adminOverview: () => get<AdminOverview>("/api/admin/overview"),
+  suspendUser: async (user_id: number, suspended: boolean, reason: string) => {
+    const { csrf_token } = await get<{ csrf_token: string }>("/api/csrf");
+    return post<{ ok: boolean }>("/api/admin/suspend", {
+      user_id,
+      suspended,
+      reason,
+      csrf_token,
+    });
+  },
+  createInvite: async () => {
+    const { csrf_token } = await get<{ csrf_token: string }>("/api/csrf");
+    return post<{ code: string }>("/api/admin/invites", { csrf_token });
   },
 };
 

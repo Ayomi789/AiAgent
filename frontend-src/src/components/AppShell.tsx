@@ -34,7 +34,8 @@ interface NavItem {
 
 function navGroups(
   running: boolean,
-  findingCount: number
+  findingCount: number,
+  isAdmin: boolean
 ): { title: string; items: NavItem[] }[] {
   return [
     {
@@ -68,6 +69,9 @@ function navGroups(
       items: [
         { to: "/app/targets", label: "Targets", icon: <Target size={15} /> },
         { to: "/app/tests", label: "Test library", icon: <Library size={15} /> },
+        ...(isAdmin
+          ? [{ to: "/app/admin", label: "Admin", icon: <ShieldCheck size={15} /> }]
+          : []),
       ],
     },
   ];
@@ -76,12 +80,20 @@ function navGroups(
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const location = useLocation();
   const live = useLiveState();
   const running = live.status === "running";
   const findingCount = (live.findings || []).length;
 
-  const NAV_GROUPS = navGroups(running, findingCount);
+  useEffect(() => {
+    api
+      .me()
+      .then((m) => setIsAdmin(m.admin))
+      .catch(() => {});
+  }, []);
+
+  const NAV_GROUPS = navGroups(running, findingCount, isAdmin);
 
   return (
     <div className="flex min-h-screen bg-app-900">
@@ -94,6 +106,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           live={live}
           running={running}
           findingCount={findingCount}
+          isAdmin={isAdmin}
         />
       </aside>
 
@@ -120,6 +133,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               live={live}
               running={running}
               findingCount={findingCount}
+              isAdmin={isAdmin}
             />
           </aside>
         </div>
@@ -208,6 +222,7 @@ function SidebarContent({
   live,
   running,
   findingCount,
+  isAdmin,
 }: {
   workspaceOpen: boolean;
   setWorkspaceOpen: (v: boolean) => void;
@@ -215,6 +230,7 @@ function SidebarContent({
   live: ReturnType<typeof useLiveState>;
   running: boolean;
   findingCount: number;
+  isAdmin: boolean;
 }) {
   const [email, setEmail] = useState<string>("…");
   useEffect(() => {
@@ -288,7 +304,7 @@ function SidebarContent({
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-2.5 py-3">
-        {navGroups(running, findingCount).map((group) => (
+        {navGroups(running, findingCount, isAdmin).map((group) => (
           <div key={group.title} className="mb-4">
             <div className="px-2.5 pb-1.5 text-[8.5px] font-semibold uppercase tracking-[0.15em] text-faint">
               {group.title}
