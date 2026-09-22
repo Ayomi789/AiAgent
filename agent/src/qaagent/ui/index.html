@@ -17,5 +17,24 @@
 </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <div style="background:#0b0d10;color:#e8ebee;font-family:system-ui,sans-serif;padding:40px 20px;text-align:center">
+        Sentinel console needs JavaScript enabled.
+      </div>
+    </noscript>
+    <script>
+      // If the bundle fails (stale cache, interrupted load), say so instead
+      // of sitting on a blank page.
+      setTimeout(function () {
+        var root = document.getElementById("root");
+        if (root && !root.hasChildNodes()) {
+          root.innerHTML =
+            '<div style="background:#0b0d10;color:#98a1ab;font-family:system-ui,sans-serif;min-height:100vh;display:grid;place-items:center;padding:20px;text-align:center">' +
+            '<div><div style="color:#e8ebee;font-size:15px;font-weight:600;margin-bottom:8px">Sentinel did not load</div>' +
+            '<div style="font-size:12.5px;margin-bottom:16px">The app files failed to load — usually a stale cache.</div>' +
+            '<button onclick="location.reload(true)" style="background:#e8ebee;color:#0b0d10;border:none;border-radius:5px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer">Reload</button></div></div>';
+        }
+      }, 8000);
+    </script>
   </body>
 </html>

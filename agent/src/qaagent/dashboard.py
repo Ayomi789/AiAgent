@@ -577,8 +577,15 @@ def create_app(
             except ValueError:
                 return jsonify({"error": "not found"}), 404
             if candidate.is_file():
-                return send_file(candidate)
-        return send_file(_UI_DIR / "index.html")
+                resp = send_file(candidate)
+                # Hashed bundle files are immutable - cache hard; the shell
+                # itself must never cache (it references the hashes).
+                if subpath.startswith("assets/"):
+                    resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                return resp
+        resp = send_file(_UI_DIR / "index.html")
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     # --- Public legal pages (Phase 3) -----------------------------------------
 
