@@ -242,7 +242,8 @@ class UserStore:
 
     def count(self) -> int:
         with self._lock, self._conn() as conn:
-            return int(self._execute(conn, "SELECT COUNT(*) FROM users").fetchone()[0])
+            row = self._execute(conn, "SELECT COUNT(*) AS n FROM users").fetchone()
+            return int(row["n"] if isinstance(row, dict) else row[0])
 
     # --- Moderation (Phase 3: admin console) ----------------------------------
 
@@ -260,7 +261,7 @@ class UserStore:
         with self._lock, self._conn() as conn:
             cur = self._execute(
                 conn,
-                f"UPDATE users SET suspended = ?, suspended_at = CASE WHEN ? "
+                f"UPDATE users SET suspended = ?, suspended_at = CASE WHEN ? <> 0 "
                 f"THEN {self._now()} ELSE NULL END, suspend_reason = ? WHERE id = ?",
                 (1 if suspended else 0, 1 if suspended else 0,
                  reason if suspended else None, user_id),
