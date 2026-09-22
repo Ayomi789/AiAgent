@@ -1077,6 +1077,14 @@ def create_app(
             }
         )
 
+    @app.get("/api/scan/capabilities")
+    def api_scan_capabilities():
+        """Can this instance run a full scan? RAM + live LLM check, plain words."""
+        from qaagent import capabilities as _cap
+
+        name = (request.args.get("config") or "").strip() or None
+        return jsonify(_cap.check_full_scan(name))
+
     @app.get("/api/state")
     def api_state():
         try:

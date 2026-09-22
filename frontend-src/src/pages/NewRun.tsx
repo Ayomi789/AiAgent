@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Play, Globe, ShieldCheck, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Play, Globe, ShieldCheck, CheckCircle2, AlertTriangle, Info } from "lucide-react";
 import { Toggle, PanelHeader } from "../components/ui";
-import { ApiError, api, type ConfigEntry } from "../lib/api";
+import { ApiError, api, type Capabilities, type ConfigEntry } from "../lib/api";
 
 export function NewRun() {
   const navigate = useNavigate();
@@ -13,6 +13,8 @@ export function NewRun() {
   const [authorized, setAuthorized] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [caps, setCaps] = useState<Capabilities | null>(null);
+  const [capsChecking, setCapsChecking] = useState(false);
 
   useEffect(() => {
     api
@@ -22,6 +24,31 @@ export function NewRun() {
   }, []);
 
   const effectiveTarget = target.trim() || selectedConfig;
+
+  // When full scan is selected, ask the server whether this instance can
+  // actually run one — and say why not in plain words if it can't.
+  useEffect(() => {
+    if (skipLlm || !effectiveTarget) {
+      setCaps(null);
+      return;
+    }
+    let alive = true;
+    setCapsChecking(true);
+    api
+      .capabilities(target.trim() || selectedConfig)
+      .then((c) => {
+        if (alive) setCaps(c);
+      })
+      .catch(() => {
+        if (alive) setCaps(null);
+      })
+      .finally(() => {
+        if (alive) setCapsChecking(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [skipLlm, target, selectedConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleStart = async () => {
     if (!effectiveTarget) {
@@ -174,6 +201,30 @@ export function NewRun() {
               <p className="text-[11.5px] leading-relaxed text-[#f28286]">{error}</p>
             </div>
           ) : null}
+
+          {!skipLlm && effectiveTarget ? (
+            <div className="flex items-start gap-2 rounded-[6px] border border-[rgba(76,141,255,0.24)] bg-[rgba(76,141,255,0.05)] p-3">
+              <Info size={13} className="mt-[1px] shrink-0 text-[#7fa9f0]" />
+              <div className="text-[11px] leading-relaxed text-muted">
+                {capsChecking || !caps ? (
+                  <span>Checking whether this instance can run a full scan…</span>
+                ) : caps.full_ok ? (
+                  <span className="text-[#66c07a]">
+                    This instance can run a full scan — browser and AI backend both ready.
+                  </span>
+                ) : (
+                  <span>
+                    Full scan is not available here right now:
+                    <ul className="mt-1.5 list-disc space-y-1 pl-4 text-ink-soft">
+                      {caps.reasons.map((r) => (
+                        <li key={r}>{r}</li>
+                      ))}
+                    </ul>
+                  </span>
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {/* Summary rail */}
@@ -198,9 +249,17 @@ export function NewRun() {
 
             <div className="border-t border-line p-4">
               <button
-                className="btn-primary w-full !py-[9px]"
+                className="btn-primary w-full !py-[9px] disabled:opacity-50"
                 onClick={handleStart}
-                disabled={starting}
+                disabled={
+                  starting ||
+                  (!skipLlm && !!effectiveTarget && (!caps || !caps.full_ok))
+                }
+                title={
+                  !skipLlm && !!effectiveTarget && caps && !caps.full_ok
+                    ? "Full scan unavailable — see above, or switch to deterministic"
+                    : undefined
+                }
               >
                 <Play size={13} />
                 {starting ? "Starting…" : "Start test run"}

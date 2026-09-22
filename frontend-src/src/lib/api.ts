@@ -120,6 +120,15 @@ export interface MeData {
   admin: boolean;
 }
 
+export interface Capabilities {
+  ram_mb: number | null;
+  ram_ok: boolean;
+  llm_ok: boolean | null;
+  llm_message: string;
+  full_ok: boolean;
+  reasons: string[];
+}
+
 export interface AdminUser {
   id: number;
   email: string;
@@ -245,6 +254,8 @@ export const api = {
   history: () => get<{ runs: HistoryRun[] }>("/api/history"),
   diff: () => get<DiffData>("/api/diff"),
   configs: () => get<{ configs: ConfigEntry[] }>("/api/configs"),
+  capabilities: (config: string) =>
+    get<Capabilities>(`/api/scan/capabilities?config=${encodeURIComponent(config)}`),
   report: () => get<ReportFile>("/api/report"),
   startScan: (config: string, skip_llm: boolean, authorized: boolean) =>
     post<{ started: boolean; config: string; skip_llm: boolean; created: boolean }>("/api/scan", {
