@@ -58,14 +58,9 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   }, []);
 
   if (state !== "ok") {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-app-900">
-        <span className="h-[26px] w-[26px] rounded-[5px] border border-line-strong bg-app-800 animate-pulse-dot" />
-        <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-faint">
-          Verifying session…
-        </span>
-      </div>
-    );
+    // Deliberately blank: the page background already matches the app, so
+    // the check is invisible instead of a splash screen.
+    return null;
   }
   return <>{children}</>;
 }
