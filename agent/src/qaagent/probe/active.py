@@ -879,9 +879,21 @@ async def _probe_subdirectories(
             )
 
 
-async def run_active_probe(config: RunConfig, collector: Collector) -> None:
-    """Crawl the target, discover forms, and fire the payload probes."""
+async def run_active_probe(
+    config: RunConfig,
+    collector: Collector,
+    on_progress=None,
+) -> None:
+    """Crawl the target, discover forms, and fire the payload probes.
+
+    on_progress, when given, is called with short human-readable stage
+    labels as the crawl advances, so live UIs can narrate the run.
+    """
     target = config.target
+
+    def _say(stage: str) -> None:
+        if on_progress is not None:
+            on_progress(stage)
     async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
         # 1. Crawl: home page, then a handful of same-origin links, collecting
         #    forms (which reveals search/login pages without hardcoding paths)
@@ -891,6 +903,7 @@ async def run_active_probe(config: RunConfig, collector: Collector) -> None:
         seen_urls: set[str] = set()
         ok_urls: set[str] = set()
         try:
+            _say("Crawling homepage")
             resp = await client.get(target)
             if resp.status_code >= 400:
                 return
@@ -905,6 +918,7 @@ async def run_active_probe(config: RunConfig, collector: Collector) -> None:
                     continue
                 seen_urls.add(link)
                 try:
+                    _say(f"Crawling {_path_of(link)}")
                     r = await client.get(link)
                     if r.status_code < 400:
                         ok_urls.add(link)
@@ -919,6 +933,7 @@ async def run_active_probe(config: RunConfig, collector: Collector) -> None:
 
         # 2. Probe each unique form (GET = search-like, POST = login-like).
         seen_forms: set[tuple] = set()
+        queue = []
         for form in forms:
             if not _same_origin(form["action"], target):
                 continue
@@ -926,6 +941,9 @@ async def run_active_probe(config: RunConfig, collector: Collector) -> None:
             if key in seen_forms:
                 continue
             seen_forms.add(key)
+            queue.append(form)
+        for i, form in enumerate(queue, 1):
+            _say(f"Testing form {i} of {len(queue)}")
             if form["method"] == "get":
                 await _probe_get_form(client, form, collector)
             elif form["method"] == "post":
@@ -934,17 +952,23 @@ async def run_active_probe(config: RunConfig, collector: Collector) -> None:
         # 3. Sensitive endpoints and backup files on the target origin.
         files = _sensitive_files_for(config)
         home_norm = await _fetch_home_norm(client, target)
+        _say("Checking admin and debug endpoints")
         await _probe_sensitive_paths(client, target, collector, home_norm=home_norm)
+        _say(f"Checking {len(files)} backup and secret filenames")
         await _probe_sensitive_files(client, target, collector, files)
 
         # 3b. Discovered subdirectories: probe the same artifact classes there.
         dirs = _discover_directories(ok_urls)
+        if dirs:
+            _say(f"Checking {len(dirs)} discovered subdirectories")
         await _probe_subdirectories(
             client, target, collector, dirs, files, home_norm
         )
 
         # 4. IDOR / object enumeration on id-parameter links.
+        _say("Checking object references for data leaks")
         await _probe_idor(client, sorted(all_links), target, collector)
 
         # 5. Open redirect on redirect-parameter links.
+        _say("Checking redirects for off-site hops")
         await _probe_open_redirect(client, sorted(all_links), target, collector)

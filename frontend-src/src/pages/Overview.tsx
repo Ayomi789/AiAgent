@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Plus, Globe, Clock, Activity, ArrowUpRight, Terminal, GitCompare } from "lucide-react";
 import { PanelHeader, SeverityBadge, StatusBadge } from "../components/ui";
@@ -6,11 +7,22 @@ import { useLiveState, useScanStatus, useDiff } from "../lib/useLive";
 import { countBySeverity, toFinding } from "../lib/api";
 
 function fmtElapsed(s?: number): string {
-  const t = s ?? 0;
+  const t = Math.max(0, Math.floor(s ?? 0));
   const h = Math.floor(t / 3600);
   const m = Math.floor((t % 3600) / 60);
-  const sec = Math.floor(t % 60);
+  const sec = t % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
+/** Ticks once a second while a scan runs so elapsed never looks frozen. */
+function useNowTick(running: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [running]);
+  return now;
 }
 
 export function Overview() {
@@ -19,6 +31,16 @@ export function Overview() {
   const diff = useDiff();
 
   const running = live.status === "running" || scan.running;
+  const now = useNowTick(running);
+  // Backend elapsed only refreshes on state writes — derive a live value
+  // from started_at while running so the clock never looks frozen.
+  let elapsed = live.elapsed_seconds ?? 0;
+  if (running && live.started_at) {
+    const startedMs = Date.parse(live.started_at);
+    if (!Number.isNaN(startedMs)) {
+      elapsed = Math.max(elapsed, (now - startedMs) / 1000);
+    }
+  }
   const counts = countBySeverity(live.findings || []);
   const total = (live.findings || []).length;
   const recent = (live.findings || []).slice(0, 6).map((f) => toFinding(f, ""));
@@ -68,7 +90,7 @@ export function Overview() {
               <div className="flex items-center gap-1.5">
                 <Clock size={11} className="text-faint" />
                 <span className="font-mono text-[11px] text-ink-soft">
-                  {fmtElapsed(live.elapsed_seconds)}
+                  {fmtElapsed(elapsed)}
                 </span>
                 <span className="text-[9px] text-faint">elapsed</span>
               </div>

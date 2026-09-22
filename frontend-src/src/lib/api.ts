@@ -62,6 +62,7 @@ export interface LiveState {
   status: string;
   stage?: string;
   target?: string;
+  started_at?: string;
   current_url?: string;
   step?: number;
   max_steps?: number;

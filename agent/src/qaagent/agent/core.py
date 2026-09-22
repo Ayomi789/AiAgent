@@ -77,25 +77,31 @@ class Agent:
                         f"{self.config.llm.api_key_env} (set it, or add it to agent/.env)"
                     )
 
-            async with Browser(
-                headless=self.config.headless,
-                channel=self.config.browser_channel,
-            ) as browser:
-                # 1. Deterministic probes (no LLM needed): passive checks for
-                #    headers/cookies, then active payload probes for XSS/SQLi/
-                #    SSTI/login bypass/exposed endpoints.
-                live.update(stage="Passive security checks")
-                await run_passive_probe(
-                    self.config.target, self.config.credentials, collector
-                )
-                live.set_findings(collector.findings)
+            # 1. Deterministic probes (no LLM needed, no browser either):
+            #    passive checks for headers/cookies, then active payload
+            #    probes for XSS/SQLi/SSTI/login bypass/exposed endpoints.
+            live.update(stage="Passive security checks")
+            await run_passive_probe(
+                self.config.target, self.config.credentials, collector
+            )
+            live.set_findings(collector.findings)
 
-                live.update(stage="Active payload probes")
-                await run_active_probe(self.config, collector)
-                live.set_findings(collector.findings)
+            live.update(stage="Active payload probes")
+            await run_active_probe(
+                self.config,
+                collector,
+                on_progress=lambda stage: live.update(stage=stage),
+            )
+            live.set_findings(collector.findings)
 
-                # 2. LLM-driven loop (skipped entirely with --skip-llm).
-                if not self.config.skip_llm:
+            # 2. LLM-driven loop (skipped entirely with --skip-llm) - the only
+            #    part that needs a real browser, so it starts here and not a
+            #    moment sooner (small instances thank us).
+            if not self.config.skip_llm:
+                async with Browser(
+                    headless=self.config.headless,
+                    channel=self.config.browser_channel,
+                ) as browser:
                     live.update(stage="Exploring target")
                     home = await browser.navigate(self.config.target)
                     state = RunState()
