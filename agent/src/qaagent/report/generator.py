@@ -130,7 +130,17 @@ def save_report_json(report: Report, output_dir: str | Path) -> Path:
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"report-{_stamp(report)}.json"
-    path.write_text(_redacted_report(report).model_dump_json(indent=2), encoding="utf-8")
+    redacted = _redacted_report(report)
+    path.write_text(redacted.model_dump_json(indent=2), encoding="utf-8")
+    # Persistent archive (Neon): survives host disk wipes; no-op locally.
+    try:
+        from qaagent.auth import _pg_url
+        from qaagent.report.store import save_record
+
+        if _pg_url():
+            save_record(_stamp(report), redacted.model_dump(mode="json"))
+    except Exception:
+        pass
     return path
 
 

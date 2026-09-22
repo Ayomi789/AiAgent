@@ -261,6 +261,17 @@ def create_app(
     users = UserStore(users_db or (Path(reports_dir) / "users.db"))
     limiter = RateLimiter(max_attempts=5, window_seconds=300)
 
+    # Wipe recovery: restore any archived reports missing from the local
+    # disk (free hosts evaporate it). Silent no-op without DATABASE_URL.
+    try:
+        from qaagent.auth import _pg_url
+        from qaagent.report.store import rehydrate_reports
+
+        if _pg_url():
+            rehydrate_reports(Path(reports_dir))
+    except Exception:
+        pass
+
     def _cookie_kwargs() -> dict:
         """Cookie flags for the dashboard token cookie, Secure on https."""
         return {
