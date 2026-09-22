@@ -38,12 +38,12 @@ export function Landing() {
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-line bg-app-900/95 backdrop-blur-[2px]">
         <div className="mx-auto flex h-[56px] max-w-[1240px] items-center gap-3 px-5">
-          <Link to="/" className="flex items-center gap-2.5">
-            <span className="flex h-[28px] w-[28px] items-center justify-center rounded-[5px] border border-line-strong bg-app-800">
+          <Link to="/" className="flex min-w-0 shrink items-center gap-2.5">
+            <span className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[5px] border border-line-strong bg-app-800">
               <ShieldCheck size={15} className="text-ink" />
             </span>
-            <span className="text-[12.5px] font-semibold tracking-[-0.01em] text-ink">
-              AI Testing Agent
+            <span className="truncate text-[12.5px] font-semibold tracking-[-0.01em] text-ink">
+              Sentinel
             </span>
           </Link>
 
@@ -59,15 +59,25 @@ export function Landing() {
             ))}
           </nav>
 
-          <div className="ml-auto flex items-center gap-2">
-            <Link to="/login" className="font-mono text-[10.5px] text-muted hover:text-ink">
+          <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
+            <Link
+              to="/login"
+              className="shrink-0 font-mono text-[10.5px] text-muted hover:text-ink"
+            >
               Sign in
             </Link>
-            <a href="#reporting" className="btn-secondary !py-[6px] !text-[11px]">
+            <a
+              href="#reporting"
+              className="btn-secondary hidden !py-[6px] !text-[11px] md:inline-flex"
+            >
               View sample report
             </a>
-            <Link to="/app" className="btn-primary !py-[6px] !text-[11px]">
-              Open workspace
+            <Link
+              to="/app"
+              className="btn-primary shrink-0 whitespace-nowrap !px-3 !py-[6px] !text-[11px] sm:!px-3.5"
+            >
+              <span className="hidden min-[400px]:inline">Open workspace</span>
+              <span className="min-[400px]:hidden">Open</span>
               <ArrowRight size={11} />
             </Link>
           </div>
@@ -259,7 +269,7 @@ export function Landing() {
           <SectionHeader
             eyebrow="01 · Product overview"
             title="Serious software for testing real applications."
-            description="AI Testing Agent combines autonomous browser exploration with deterministic security and functional verification. It is built for engineering teams that need reproducible results, not probabilistic guesses."
+            description="Sentinel combines autonomous browser exploration with deterministic security and functional verification. It is built for engineering teams that need reproducible results, not probabilistic guesses."
           />
 
           <div className="mt-9 grid grid-cols-1 gap-px overflow-hidden rounded-[6px] border border-line bg-line md:grid-cols-2 lg:grid-cols-3">
