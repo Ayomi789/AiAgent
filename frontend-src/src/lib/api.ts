@@ -16,12 +16,31 @@ export class ApiError extends Error {
   }
 }
 
+// Last time any API call failed at the network level (server asleep,
+// overloaded, or gone). The shell reads this to show "reconnecting"
+// instead of silently rendering empty states that look like data loss.
+let lastNetFailure = 0;
+export function noteNetFailure() {
+  lastNetFailure = Date.now();
+}
+export function serverSilent(now: number = Date.now()): boolean {
+  return now - lastNetFailure < 8000;
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      ...init,
+    });
+  } catch {
+    // Network-level: asleep, overloaded, or gone. Callers keep last state;
+    // the shell surfaces this instead of fake-empty screens.
+    noteNetFailure();
+    throw new ApiError(0, "Server unreachable.");
+  }
   if (res.status === 401) {
     // Session expired (or server slept and lost it) — console sign-in handles it.
     window.location.href = "/console/login";

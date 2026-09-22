@@ -4,7 +4,7 @@ import { Plus, Globe, Clock, Activity, ArrowUpRight, Terminal, GitCompare } from
 import { PanelHeader, SeverityBadge, StatusBadge } from "../components/ui";
 import { SeverityStack } from "../components/Charts";
 import { useLiveState, useScanStatus, useDiff } from "../lib/useLive";
-import { countBySeverity, toFinding } from "../lib/api";
+import { countBySeverity, serverSilent, toFinding } from "../lib/api";
 
 function fmtElapsed(s?: number): string {
   const t = Math.max(0, Math.floor(s ?? 0));
@@ -282,10 +282,12 @@ export function Overview() {
           ) : (
             <div className="px-6 py-12 text-center">
               <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-soft">
-                No findings yet
+                {serverSilent() ? "Can't reach the server" : "No findings yet"}
               </p>
               <p className="mx-auto mt-1.5 max-w-[380px] text-[11px] leading-relaxed text-dim">
-                Run your first scan and verified findings will stream in here, ordered by severity.
+                {serverSilent()
+                  ? "Polls are failing — the instance may be asleep or restarting. It usually answers within a minute; this page refills on its own."
+                  : "Run your first scan and verified findings will stream in here, ordered by severity."}
               </p>
               <Link to="/app/runs/new" className="btn-primary mx-auto mt-4">
                 Start a run

@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 
 import { useLiveState } from "../lib/useLive";
-import { api } from "../lib/api";
+import { api, serverSilent } from "../lib/api";
 import { NotificationBell } from "./Notifications";
 
 interface NavItem {
@@ -85,6 +85,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const live = useLiveState();
   const running = live.status === "running";
   const findingCount = (live.findings || []).length;
+  const silent = serverSilent();
 
   useEffect(() => {
     api
@@ -174,19 +175,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
               <div className="hidden items-center gap-1.5 rounded-[4px] border px-2 py-[5px] sm:flex"
                 style={
-                  running
-                    ? { borderColor: "rgba(76,141,255,0.28)", backgroundColor: "rgba(76,141,255,0.09)" }
-                    : { borderColor: "#22262c", backgroundColor: "transparent" }
+                  silent
+                    ? { borderColor: "rgba(245,166,35,0.35)", backgroundColor: "rgba(245,166,35,0.07)" }
+                    : running
+                      ? { borderColor: "rgba(76,141,255,0.28)", backgroundColor: "rgba(76,141,255,0.09)" }
+                      : { borderColor: "#22262c", backgroundColor: "transparent" }
                 }
+                title={silent ? "The server stopped answering — polls keep retrying" : undefined}
               >
                 <span
-                  className={`h-[5px] w-[5px] rounded-full ${running ? "bg-[#4c8dff] animate-pulse-dot" : "bg-[#4d555e]"}`}
+                  className={`h-[5px] w-[5px] rounded-full ${silent ? "bg-[#f5a623] animate-pulse-dot" : running ? "bg-[#4c8dff] animate-pulse-dot" : "bg-[#4d555e]"}`}
                 />
                 <span
                   className="font-mono text-[8.5px] font-semibold uppercase tracking-[0.13em]"
-                  style={{ color: running ? "#7fa9f0" : "#4d555e" }}
+                  style={{ color: silent ? "#f0b95c" : running ? "#7fa9f0" : "#4d555e" }}
                 >
-                  {running ? "Run active" : "Idle"}
+                  {silent ? "Reconnecting" : running ? "Run active" : "Idle"}
                 </span>
               </div>
 

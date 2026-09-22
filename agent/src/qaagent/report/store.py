@@ -100,6 +100,7 @@ def list_records() -> list[tuple[str, dict]]:
 def rehydrate_reports(reports_dir: Path) -> int:
     """Rewrite missing report artifacts from the archive. Returns count restored."""
     if not enabled():
+        print("[sentinel] archive disabled (no DATABASE_URL), skipping restore")
         return 0
     from qaagent.models import Report
     from qaagent.report.generator import (
@@ -110,10 +111,15 @@ def rehydrate_reports(reports_dir: Path) -> int:
     )
 
     reports_dir = Path(reports_dir)
+    try:
+        rows = list_records()
+    except Exception as exc:
+        print(f"[sentinel] archive restore failed: {exc}")
+        return 0
     existing = {p.stem[len("report-"):] for p in reports_dir.glob("report-*.json")}
     restored = 0
     newest = None
-    for stamp, blob in list_records():
+    for stamp, blob in rows:
         try:
             report = Report.model_validate(blob)
         except Exception:
@@ -148,4 +154,5 @@ def rehydrate_reports(reports_dir: Path) -> int:
             save_summary(newest, reports_dir, md, js)
         except Exception:
             pass
+    print(f"[sentinel] archive restore: {restored} report(s) rewritten from Postgres")
     return restored

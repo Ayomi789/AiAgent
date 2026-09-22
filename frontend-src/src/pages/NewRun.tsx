@@ -68,10 +68,10 @@ export function NewRun() {
       try {
         await attempt();
       } catch (e) {
-        // Network-level failure (sleeping instance, proxy hiccup) — the
-        // request never reached the server, so one retry is safe: nothing
-        // could have started. API errors (409/403/429/400) never retry.
-        if (e instanceof ApiError) throw e;
+        // Network-level failure (status 0: sleeping instance, proxy hiccup) —
+        // the request never reached the server, so one retry is safe: nothing
+        // could have started. API errors (409/403/429/400/5xx) never retry.
+        if (e instanceof ApiError && e.status !== 0) throw e;
         await new Promise((r) => window.setTimeout(r, 2500));
         await attempt();
       }
@@ -88,6 +88,11 @@ export function NewRun() {
           );
         else if (e.status >= 500)
           setError("The server errored starting the scan — check Render → Logs, then retry.");
+        else if (e.status === 0)
+          setError(
+            "The start request didn't reach the server (network hiccup or a sleeping " +
+              "instance). Wait a few seconds and tap Start again."
+          );
         else setError(e.message);
       } else {
         setError(
