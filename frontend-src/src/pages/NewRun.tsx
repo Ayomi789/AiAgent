@@ -137,20 +137,14 @@ export function NewRun() {
                 label="Deterministic-only scan"
                 description="Passive checks (headers, cookies, banners) plus active probes (XSS, SSTI, SQLi, login bypass, IDOR, open redirect, sensitive files). Seconds, no API key, no browser — fits small instances."
                 checked={skipLlm}
-                onChange={setSkipLlm}
+                onChange={(next) => setSkipLlm(next)}
               />
-              <div className="flex items-start justify-between gap-4 py-2.5">
-                <div className="min-w-0">
-                  <div className="text-[12.5px] font-medium text-ink">Full scan (LLM + browser)</div>
-                  <div className="mt-0.5 text-[11px] leading-relaxed text-dim">
-                    Adds the observe → think → act → verify loop with real browser interaction.
-                    Needs ~2 GB RAM and a working LLM key.
-                  </div>
-                </div>
-                <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.12em] text-faint">
-                  {!skipLlm ? "selected" : "off"}
-                </span>
-              </div>
+              <Toggle
+                label="Full scan (LLM + browser)"
+                description="Adds the observe → think → act → verify loop with real browser interaction. Needs ~2 GB RAM and a working LLM key."
+                checked={!skipLlm}
+                onChange={(next) => setSkipLlm(!next)}
+              />
             </div>
           </div>
 
