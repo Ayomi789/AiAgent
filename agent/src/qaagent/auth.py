@@ -4,7 +4,9 @@ Local single-user mode needs only the bootstrap token; a hosted multi-user
 deployment needs real accounts. This module provides the smallest correct
 version of that:
 
-- SQLite user store (same DB-file pattern as reports/live state)
+- User store on SQLite (same DB-file pattern as reports/live state), or on
+  free Postgres (Neon/Supabase) when DATABASE_URL is set - so accounts
+  survive redeploys on hosts with ephemeral disks
 - Password hashing with Werkzeug's scrypt (already a dependency)
 - Per-IP sliding-window rate limiting for login/signup (brute-force defense)
 - CSRF tokens for all state-changing forms
@@ -27,6 +29,48 @@ from pathlib import Path
 from flask import session
 from werkzeug.security import check_password_hash, generate_password_hash
 
+
+def _pg_url() -> str:
+    """Postgres connection string, or "" for the SQLite default."""
+    return os.environ.get("DATABASE_URL", "").strip()
+
+
+def _pg_conn():
+    """One Postgres connection (autocommit; short-lived, like _conn)."""
+    import psycopg
+    from psycopg.rows import dict_row
+
+    conn = psycopg.connect(_pg_url(), row_factory=dict_row)
+    conn.autocommit = True
+    return conn
+
+
+_PG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user',
+    created_at TEXT NOT NULL DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS')),
+    suspended INTEGER NOT NULL DEFAULT 0,
+    suspended_at TEXT,
+    suspend_reason TEXT
+);
+CREATE TABLE IF NOT EXISTS invites (
+    code TEXT PRIMARY KEY,
+    created_by INTEGER,
+    used_by INTEGER,
+    used_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS'))
+);
+CREATE TABLE IF NOT EXISTS terms_acceptances (
+    user_id INTEGER PRIMARY KEY,
+    version TEXT NOT NULL,
+    accepted_at TEXT NOT NULL DEFAULT (to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS')),
+    ip TEXT
+);
+"""
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +91,7 @@ ALTER TABLE users ADD COLUMN suspend_reason TEXT;
 
 
 class UserStore:
-    """SQLite-backed user accounts."""
+    """User accounts on SQLite (default) or Postgres (DATABASE_URL set)."""
 
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path)
@@ -56,9 +100,33 @@ class UserStore:
         with self._conn() as conn:
             self._migrate(conn)
 
-    def _migrate(self, conn: sqlite3.Connection) -> None:
+    @staticmethod
+    def _pg() -> bool:
+        # Read dynamically (not at import) so tests and deploys can flip
+        # backends without a restart of the interpreter.
+        return bool(_pg_url())
+
+    def _conn(self):
+        if self._pg():
+            return _pg_conn()
+        conn = sqlite3.connect(self.db_path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _execute(self, conn, sql: str, params: tuple = ()):
+        """`?` placeholders work on SQLite; Postgres wants `%s`."""
+        return conn.execute(self._q(sql), params)
+
+    def _q(self, sql: str) -> str:
+        return sql.replace("?", "%s") if self._pg() else sql
+
+    def _migrate(self, conn) -> None:
         """Create the schema, then tolerate pre-existing older databases:
         every ALTER fails silently if the column already exists."""
+        if self._pg():
+            for stmt in (s for s in _PG_SCHEMA.split(";") if s.strip()):
+                conn.execute(stmt)
+            return
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,10 +159,11 @@ class UserStore:
             except sqlite3.OperationalError:
                 pass  # column already exists
 
-    def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=10)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _now(self) -> str:
+        """Timestamp expression matching the SQLite text format on both backends."""
+        if self._pg():
+            return "to_char(NOW(), 'YYYY-MM-DD HH24:MI:SS')"
+        return "datetime('now')"
 
     def create_user(self, email: str, password: str, role: str = "user") -> int | None:
         """Create a user; returns the id, or None if the email is taken."""
@@ -104,24 +173,33 @@ class UserStore:
         if len(password) < 8:
             raise ValueError("password must be at least 8 characters")
         with self._lock, self._conn() as conn:
-            existing = conn.execute(
-                "SELECT id FROM users WHERE email = ?", (email,)
+            existing = self._execute(
+                conn, "SELECT id FROM users WHERE email = ?", (email,)
             ).fetchone()
             if existing:
                 return None
-            cur = conn.execute(
+            if self._pg():
+                row = self._execute(
+                    conn,
+                    "INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?) "
+                    "RETURNING id",
+                    (email, generate_password_hash(password), role),
+                ).fetchone()
+                return int(row["id"])
+            cur = self._execute(
+                conn,
                 "INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)",
                 (email, generate_password_hash(password), role),
             )
             return int(cur.lastrowid)
 
-    def verify(self, email: str, password: str) -> sqlite3.Row | None:
+    def verify(self, email: str, password: str):
         """Return the user row if the credentials are valid and the account
         is not suspended, else None."""
         email = email.strip().lower()
         with self._lock, self._conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM users WHERE email = ?", (email,)
+            row = self._execute(
+                conn, "SELECT * FROM users WHERE email = ?", (email,)
             ).fetchone()
         if row is None or row["suspended"]:
             return None
@@ -129,9 +207,10 @@ class UserStore:
             return row
         return None
 
-    def get(self, user_id: int) -> sqlite3.Row | None:
+    def get(self, user_id: int):
         with self._lock, self._conn() as conn:
-            return conn.execute(
+            return self._execute(
+                conn,
                 "SELECT id, email, role, created_at, suspended, suspended_at, "
                 "suspend_reason FROM users WHERE id = ?",
                 (user_id,),
@@ -142,9 +221,10 @@ class UserStore:
     def accept_terms(self, user_id: int, version: str, ip: str = "") -> None:
         """Record (or re-record) the user's acceptance of the given version."""
         with self._lock, self._conn() as conn:
-            conn.execute(
-                "INSERT INTO terms_acceptances (user_id, version, accepted_at, ip) "
-                "VALUES (?, ?, datetime('now'), ?) "
+            self._execute(
+                conn,
+                f"INSERT INTO terms_acceptances (user_id, version, accepted_at, ip) "
+                f"VALUES (?, ?, {self._now()}, ?) "
                 "ON CONFLICT(user_id) DO UPDATE SET version = excluded.version, "
                 "accepted_at = excluded.accepted_at, ip = excluded.ip",
                 (user_id, version, ip),
@@ -153,7 +233,8 @@ class UserStore:
     def terms_accepted_version(self, user_id: int) -> str | None:
         """The terms version this user last accepted, or None."""
         with self._lock, self._conn() as conn:
-            row = conn.execute(
+            row = self._execute(
+                conn,
                 "SELECT version FROM terms_acceptances WHERE user_id = ?",
                 (user_id,),
             ).fetchone()
@@ -161,24 +242,26 @@ class UserStore:
 
     def count(self) -> int:
         with self._lock, self._conn() as conn:
-            return int(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+            return int(self._execute(conn, "SELECT COUNT(*) FROM users").fetchone()[0])
 
     # --- Moderation (Phase 3: admin console) ----------------------------------
 
-    def list_users(self) -> list[sqlite3.Row]:
+    def list_users(self) -> list:
         """Every account, for the admin console (small deployments: fine)."""
         with self._lock, self._conn() as conn:
-            return conn.execute(
+            return self._execute(
+                conn,
                 "SELECT id, email, role, created_at, suspended, suspended_at, "
-                "suspend_reason FROM users ORDER BY id"
+                "suspend_reason FROM users ORDER BY id",
             ).fetchall()
 
     def set_suspended(self, user_id: int, suspended: bool, reason: str = "") -> bool:
         """Suspend or reinstate an account. Returns True if a row changed."""
         with self._lock, self._conn() as conn:
-            cur = conn.execute(
-                "UPDATE users SET suspended = ?, suspended_at = CASE WHEN ? "
-                "THEN datetime('now') ELSE NULL END, suspend_reason = ? WHERE id = ?",
+            cur = self._execute(
+                conn,
+                f"UPDATE users SET suspended = ?, suspended_at = CASE WHEN ? "
+                f"THEN {self._now()} ELSE NULL END, suspend_reason = ? WHERE id = ?",
                 (1 if suspended else 0, 1 if suspended else 0,
                  reason if suspended else None, user_id),
             )
@@ -190,7 +273,8 @@ class UserStore:
         """Mint a single-use signup code (URL-safe, unguessable)."""
         code = secrets.token_urlsafe(12)
         with self._lock, self._conn() as conn:
-            conn.execute(
+            self._execute(
+                conn,
                 "INSERT INTO invites (code, created_by) VALUES (?, ?)",
                 (code, created_by),
             )
@@ -201,18 +285,20 @@ class UserStore:
         if not code:
             return False
         with self._lock, self._conn() as conn:
-            cur = conn.execute(
-                "UPDATE invites SET used_by = -1, used_at = datetime('now') "
+            cur = self._execute(
+                conn,
+                f"UPDATE invites SET used_by = -1, used_at = {self._now()} "
                 "WHERE code = ? AND used_by IS NULL",
                 (code.strip(),),
             )
             return cur.rowcount == 1
 
-    def list_invites(self) -> list[sqlite3.Row]:
+    def list_invites(self) -> list:
         with self._lock, self._conn() as conn:
-            return conn.execute(
+            return self._execute(
+                conn,
                 "SELECT code, created_by, used_by, used_at, created_at "
-                "FROM invites ORDER BY created_at DESC LIMIT 100"
+                "FROM invites ORDER BY created_at DESC LIMIT 100",
             ).fetchall()
 
 

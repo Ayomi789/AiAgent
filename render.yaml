@@ -43,6 +43,11 @@ services:
       # Environment Variable). Never commit the real key.
       - key: NVIDIA_API_KEY
         sync: false
+      # Free Postgres (Neon/Supabase): paste the connection string here and
+      # accounts/invites survive every redeploy. Empty = local SQLite file
+      # (wiped on free-tier restarts). Include ?sslmode=require.
+      - key: DATABASE_URL
+        sync: false
       # Bootstrap token: first visitor needs it to claim the admin account.
       # Generate one (python -c "import secrets; print(secrets.token_urlsafe(32))")
       # and paste it here as a secret; leave unset to auto-generate into

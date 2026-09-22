@@ -30,7 +30,7 @@ COPY agent/pyproject.toml agent/README.md /app/agent/
 COPY agent/src /app/agent/src
 COPY wsgi.py /app/wsgi.py
 RUN cd /app/agent \
-    && pip install --no-cache-dir -e ".[prod,targets]" \
+    && pip install --no-cache-dir -e ".[prod,targets,postgres]" \
     && playwright install chromium
 
 # Runtime state (reports/, users.db, tokens, configs) - mount a volume at /data.
