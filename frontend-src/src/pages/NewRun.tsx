@@ -61,9 +61,20 @@ export function NewRun() {
     }
     setStarting(true);
     setError(null);
+    const attempt = () =>
+      api.startScan(target.trim() || selectedConfig, skipLlm, true);
     try {
       // A bare domain auto-creates a config server-side, mirroring the CLI.
-      await api.startScan(target.trim() || selectedConfig, skipLlm, true);
+      try {
+        await attempt();
+      } catch (e) {
+        // Network-level failure (sleeping instance, proxy hiccup) — the
+        // request never reached the server, so one retry is safe: nothing
+        // could have started. API errors (409/403/429/400) never retry.
+        if (e instanceof ApiError) throw e;
+        await new Promise((r) => window.setTimeout(r, 2500));
+        await attempt();
+      }
       navigate("/app");
     } catch (e) {
       if (e instanceof ApiError) {
@@ -75,9 +86,14 @@ export function NewRun() {
               ? "Accept the Terms of Service first (see /terms), then start the scan."
               : e.message
           );
+        else if (e.status >= 500)
+          setError("The server errored starting the scan — check Render → Logs, then retry.");
         else setError(e.message);
       } else {
-        setError("Could not start the scan — is the server awake?");
+        setError(
+          "The start request didn't reach the server (network hiccup or a sleeping " +
+            "instance). Wait a few seconds and tap Start again."
+        );
       }
       setStarting(false);
     }
