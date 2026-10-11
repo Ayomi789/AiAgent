@@ -194,17 +194,25 @@ def probe_llm(cfg: LLMConfig | None = None) -> Check:
     )
 
 
-def check_target(url: str) -> Check:
+def check_target(url: str, proxy: str | None = None) -> Check:
     """Can we reach the target at all? Any HTTP response counts as reachable."""
+    from qaagent.netproxy import resolve_proxy, should_proxy
+
     parsed = urlparse(url if "://" in url else f"https://{url}")
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return Check("target", "fail", f"{url!r} is not a valid http(s) URL")
+    proxy_url = resolve_proxy(explicit=proxy)
+    kwargs: dict = {"timeout": 15, "follow_redirects": True}
+    if proxy_url and should_proxy(url, proxy_url=proxy_url):
+        kwargs["proxy"] = proxy_url
+        via = f" via proxy {proxy_url.split('@')[-1]}"
+    else:
+        via = ""
     try:
         resp = httpx.get(
             url if "://" in url else f"https://{url}",
-            timeout=15,
-            follow_redirects=True,
             headers={"User-Agent": "sentinel-doctor/1.0"},
+            **kwargs,
         )
     except httpx.ConnectError as exc:
         return Check("target", "fail", f"{parsed.hostname} unreachable: {str(exc)[:100]}")
@@ -216,9 +224,9 @@ def check_target(url: str) -> Check:
         return Check(
             "target",
             "warn",
-            f"{parsed.hostname} reachable but returned HTTP {resp.status_code}",
+            f"{parsed.hostname} reachable but returned HTTP {resp.status_code}{via}",
         )
-    return Check("target", "ok", f"{parsed.hostname} answers HTTP {resp.status_code}")
+    return Check("target", "ok", f"{parsed.hostname} answers HTTP {resp.status_code}{via}")
 
 
 def run_checks(
@@ -245,13 +253,19 @@ def run_checks(
         checks.append(Check("llm", "ok", "skipped (--skip-llm)"))
 
     target_url = target
-    if target_url is None and config_path is not None:
+    proxy_url: str | None = None
+    if config_path is not None:
         try:
-            target_url = RunConfig.from_yaml(Path(config_path)).target
+            run_cfg = RunConfig.from_yaml(Path(config_path))
+            from qaagent.netproxy import resolve_proxy
+
+            proxy_url = resolve_proxy(run_cfg)
+            if target_url is None:
+                target_url = run_cfg.target
         except Exception:
-            target_url = None
+            pass  # parse errors are already reported by check_configs
     if target_url:
-        checks.append(check_target(target_url))
+        checks.append(check_target(target_url, proxy=proxy_url))
     return checks
 
 

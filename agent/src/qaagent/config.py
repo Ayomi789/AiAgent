@@ -54,6 +54,23 @@ class CredentialsConfig(BaseModel):
     password: str
 
 
+class ProxyConfig(BaseModel):
+    """Corporate/forward proxy for reaching targets the laptop can't see directly.
+
+    Example (agent/config.testio.yml):
+        proxy:
+          server: http://forward.test.io:3128
+    With auth: add username/password. Hosts in `bypass` (loopback by
+    default) always go direct. When unset, plain HTTP_PROXY/HTTPS_PROXY/
+    NO_PROXY environment variables still apply via httpx automatically.
+    """
+
+    server: str
+    username: str | None = None
+    password: str | None = None
+    bypass: list[str] = Field(default_factory=lambda: ["localhost", "127.0.0.1", "::1"])
+
+
 class RunConfig(BaseModel):
     """Everything needed to run one agent session against one target."""
 
@@ -61,6 +78,7 @@ class RunConfig(BaseModel):
     scope: ScopeConfig
     llm: LLMConfig = Field(default_factory=LLMConfig)
     credentials: CredentialsConfig | None = None
+    proxy: ProxyConfig | None = None
     max_steps: int = Field(default=25, ge=1, le=500)
     headless: bool = True
     browser_channel: str = Field(

@@ -52,7 +52,12 @@ class Browser:
         headless: bool = True,
         channel: str = "msedge",
         timeout_ms: int = 30000,
+        proxy: dict | None = None,
     ) -> None:
+        self.headless = headless
+        self.channel = channel
+        self.timeout_ms = timeout_ms
+        self.proxy = proxy
         self.headless = headless
         self.channel = channel
         self.timeout_ms = timeout_ms
@@ -76,6 +81,8 @@ class Browser:
         kwargs = {"headless": self.headless}
         if self.channel:
             kwargs["channel"] = self.channel
+        if self.proxy:
+            kwargs["proxy"] = self.proxy
         self._browser = await self._pw.chromium.launch(**kwargs)
         self._context = await self._browser.new_context(ignore_https_errors=True)
         self.page = await self._context.new_page()

@@ -198,8 +198,9 @@ def test_run_checks_uses_config_model_and_target(tmp_path):
         captured["model"] = cfg.model
         return doctor.Check("llm", "ok", "probed")
 
-    def fake_target(url):
+    def fake_target(url, proxy=None):
         captured["target"] = url
+        captured["proxy"] = proxy
         return doctor.Check("target", "ok", "probed")
 
     with patch.object(doctor, "probe_llm", fake_probe), patch.object(doctor, "check_target", fake_target):

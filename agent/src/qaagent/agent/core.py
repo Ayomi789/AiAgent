@@ -80,9 +80,13 @@ class Agent:
             # 1. Deterministic probes (no LLM needed, no browser either):
             #    passive checks for headers/cookies, then active payload
             #    probes for XSS/SQLi/SSTI/login bypass/exposed endpoints.
+            from qaagent.netproxy import resolve_proxy
+
+            proxy_url = resolve_proxy(self.config)
             live.update(stage="Passive security checks")
             await run_passive_probe(
-                self.config.target, self.config.credentials, collector
+                self.config.target, self.config.credentials, collector,
+                proxy=proxy_url,
             )
             live.set_findings(collector.findings)
 
@@ -91,6 +95,7 @@ class Agent:
                 self.config,
                 collector,
                 on_progress=lambda stage: live.update(stage=stage),
+                proxy=proxy_url,
             )
             live.set_findings(collector.findings)
 
@@ -98,9 +103,12 @@ class Agent:
             #    part that needs a real browser, so it starts here and not a
             #    moment sooner (small instances thank us).
             if not self.config.skip_llm:
+                from qaagent.netproxy import playwright_proxy
+
                 async with Browser(
                     headless=self.config.headless,
                     channel=self.config.browser_channel,
+                    proxy=playwright_proxy(self.config),
                 ) as browser:
                     live.update(stage="Exploring target")
                     home = await browser.navigate(self.config.target)
