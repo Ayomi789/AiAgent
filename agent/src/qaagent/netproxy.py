@@ -12,13 +12,19 @@ from urllib.parse import urlparse, urlunparse
 
 
 def proxy_url_for(server: str, username: str | None = None, password: str | None = None) -> str:
-    """Embed optional credentials: http://user:pass@host:port."""
+    """Embed optional credentials: http://user:pass@host:port.
+
+    Credentials are percent-encoded (usernames like tester@1423e7 would
+    otherwise corrupt the URL authority section).
+    """
+    from urllib.parse import quote
+
     parsed = urlparse(server if "://" in server else f"http://{server}")
     host = parsed.hostname or ""
     port = f":{parsed.port}" if parsed.port else ""
     auth = ""
     if username:
-        auth = username + (f":{password}" if password else "") + "@"
+        auth = quote(username, safe="") + (f":{quote(password, safe='')}" if password else "") + "@"
     scheme = parsed.scheme or "http"
     return urlunparse((scheme, f"{auth}{host}{port}", "", "", "", ""))
 
@@ -35,6 +41,25 @@ def resolve_proxy(config=None, explicit: str | None = None) -> str | None:
             getattr(proxy_cfg, "password", None),
         )
     return os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or None
+
+
+def proxy_auth_headers(proxy_url: str | None) -> dict:
+    """Explicit Proxy-Authorization header.
+
+    httpx does not derive proxy credentials from the proxy URL's userinfo,
+    so they must be sent as a header or every request gets a 407.
+    """
+    if not proxy_url:
+        return {}
+    from urllib.parse import unquote
+    import base64
+
+    parsed = urlparse(proxy_url)
+    if not parsed.username:
+        return {}
+    raw = unquote(parsed.username) + ":" + unquote(parsed.password or "")
+    token = base64.b64encode(raw.encode()).decode()
+    return {"Proxy-Authorization": f"Basic {token}"}
 
 
 def bypass_hosts(config=None) -> list[str]:
@@ -69,9 +94,13 @@ def playwright_proxy(config=None, explicit: str | None = None) -> dict | None:
     parsed = urlparse(proxy_url)
     out: dict = {"server": f"{parsed.scheme}://{parsed.hostname}{':' + str(parsed.port) if parsed.port else ''}"}
     if parsed.username:
-        out["username"] = parsed.username
+        from urllib.parse import unquote
+
+        out["username"] = unquote(parsed.username)
     if parsed.password:
-        out["password"] = parsed.password
+        from urllib.parse import unquote as _unquote
+
+        out["password"] = _unquote(parsed.password)
     bypass = ",".join(f"*{h}" if not h.startswith("*") else h for h in bypass)
     if bypass:
         out["bypass"] = bypass

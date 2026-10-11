@@ -54,12 +54,13 @@ async def run_passive_probe(
     proxy: str | None = None,
 ) -> None:
     """Check headers and cookies on the target root; log in if credentials exist."""
-    from qaagent.netproxy import resolve_proxy, should_proxy
+    from qaagent.netproxy import proxy_auth_headers, resolve_proxy, should_proxy
 
     proxy_url = resolve_proxy(explicit=proxy)
     client_kw: dict = {"timeout": 15, "follow_redirects": False}
     if proxy_url and should_proxy(target, proxy_url=proxy_url):
         client_kw["proxy"] = proxy_url
+        client_kw["headers"] = proxy_auth_headers(proxy_url)
     async with httpx.AsyncClient(**client_kw) as client:
         try:
             resp = await client.get(target)

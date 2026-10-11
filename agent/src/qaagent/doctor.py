@@ -203,15 +203,19 @@ def check_target(url: str, proxy: str | None = None) -> Check:
         return Check("target", "fail", f"{url!r} is not a valid http(s) URL")
     proxy_url = resolve_proxy(explicit=proxy)
     kwargs: dict = {"timeout": 15, "follow_redirects": True}
+    headers = {"User-Agent": "sentinel-doctor/1.0"}
     if proxy_url and should_proxy(url, proxy_url=proxy_url):
+        from qaagent.netproxy import proxy_auth_headers
+
         kwargs["proxy"] = proxy_url
+        headers.update(proxy_auth_headers(proxy_url))
         via = f" via proxy {proxy_url.split('@')[-1]}"
     else:
         via = ""
     try:
         resp = httpx.get(
             url if "://" in url else f"https://{url}",
-            headers={"User-Agent": "sentinel-doctor/1.0"},
+            headers=headers,
             **kwargs,
         )
     except httpx.ConnectError as exc:

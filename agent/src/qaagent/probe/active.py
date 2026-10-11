@@ -896,12 +896,13 @@ async def run_active_probe(
         if on_progress is not None:
             on_progress(stage)
 
-    from qaagent.netproxy import resolve_proxy, should_proxy
+    from qaagent.netproxy import proxy_auth_headers, resolve_proxy, should_proxy
 
     proxy_url = resolve_proxy(config, explicit=proxy)
     client_kw: dict = {"timeout": 15, "follow_redirects": False}
     if proxy_url and should_proxy(target, config, proxy_url):
         client_kw["proxy"] = proxy_url
+        client_kw["headers"] = proxy_auth_headers(proxy_url)
     async with httpx.AsyncClient(**client_kw) as client:
         # 1. Crawl: home page, then a handful of same-origin links, collecting
         #    forms (which reveals search/login pages without hardcoding paths)

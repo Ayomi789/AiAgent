@@ -43,3 +43,23 @@ def test_env_fallback(monkeypatch):
     monkeypatch.delenv("HTTP_PROXY", raising=False)
     monkeypatch.setenv("HTTPS_PROXY", "http://env-proxy:8080")
     assert netproxy.resolve_proxy(_cfg()) == "http://env-proxy:8080"
+
+
+def test_at_sign_in_username_is_encoded():
+    cfg = _cfg(proxy={"server": "fwd.test.io:3128", "username": "tester@1423e7", "password": "pw."})
+    url = netproxy.resolve_proxy(cfg)
+    assert url == "http://tester%401423e7:pw.@fwd.test.io:3128"
+    pw = netproxy.playwright_proxy(cfg)
+    assert pw["server"] == "http://fwd.test.io:3128"
+    assert pw["username"] == "tester@1423e7" and pw["password"] == "pw."
+
+
+def test_proxy_auth_header_decodes_credentials():
+    headers = netproxy.proxy_auth_headers("http://tester%401423e7:pw.@fwd.test.io:3128")
+    import base64
+
+    assert headers == {
+        "Proxy-Authorization": "Basic " + base64.b64encode(b"tester@1423e7:pw.").decode()
+    }
+    assert netproxy.proxy_auth_headers(None) == {}
+    assert netproxy.proxy_auth_headers("http://fwd.test.io:3128") == {}
