@@ -63,6 +63,7 @@ def should_proxy(url: str, config=None, proxy_url: str | None = None) -> bool:
 def playwright_proxy(config=None, explicit: str | None = None) -> dict | None:
     """Proxy dict for chromium.launch(), or None for direct."""
     proxy_url = resolve_proxy(config, explicit)
+    bypass = bypass_hosts(config)
     if not proxy_url:
         return None
     parsed = urlparse(proxy_url)
@@ -71,7 +72,7 @@ def playwright_proxy(config=None, explicit: str | None = None) -> dict | None:
         out["username"] = parsed.username
     if parsed.password:
         out["password"] = parsed.password
-    bypass = ",".join(f"*{h}" if not h.startswith("*") else h for h in bypass_hosts(config))
+    bypass = ",".join(f"*{h}" if not h.startswith("*") else h for h in bypass)
     if bypass:
         out["bypass"] = bypass
     return out
